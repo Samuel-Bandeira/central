@@ -1,0 +1,28 @@
+[
+  {
+    "name": "selava-admin",
+    "folders": [
+      {
+        "name": "selava-admin",
+        "path": "/Users/samueloliveira/development/4TTIVE/selava-admin/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "npm run dev",
+    "id": "proj-5dbb314f",
+    "trelloBoardId": null
+  },
+  {
+    "name": "selava-backend",
+    "folders": [
+      {
+        "name": "selava-backend",
+        "path": "/Users/samueloliveira/development/4TTIVE/selava-backend/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "source venv/bin/activate\n\nuvicorn src.main:app --host 0.0.0.0 --port 8005",
+    "id": "proj-2fe61a6f",
+    "trelloBoardId": null
+  }
+]

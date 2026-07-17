@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Selava",
+    "position": {
+      "x": 40.0,
+      "y": 39.875,
+      "width": 550.0,
+      "height": 220.0
+    },
+    "projectIds": [
+      "proj-5dbb314f",
+      "proj-2fe61a6f"
+    ],
+    "id": "sec-e2251be7"
+  },
+  {
+    "name": "Nova seção",
+    "position": {
+      "x": 614.484,
+      "y": 36.2969,
+      "width": 320.0,
+      "height": 220.0
+    },
+    "projectIds": [],
+    "id": "sec-9c7b41db"
+  }
+]
