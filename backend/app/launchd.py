@@ -72,6 +72,15 @@ def bootstrap(project_id: str) -> None:
         text=True,
         check=True,
     )
+    # Sem RunAtLoad/KeepAlive, o bootstrap só carrega a definição do job — ele
+    # não roda sozinho. kickstart -k força o start imediato (e reinicia se já
+    # estiver rodando por algum motivo).
+    subprocess.run(
+        ["launchctl", "kickstart", "-k", f"{gui_domain()}/{agent_label(project_id)}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
 
 def bootout(project_id: str) -> None:
