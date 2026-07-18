@@ -20,9 +20,19 @@ interface Props {
   onProjectsChange: () => Promise<void>;
   onSectionsChange: () => Promise<void>;
   onOpenDetail: (project: Project) => void;
+  onOpenActivities: (project: Project) => void;
+  onOpenTrello: (project: Project) => void;
 }
 
-export function ProjectsTab({ projects, sections, onProjectsChange, onSectionsChange, onOpenDetail }: Props) {
+export function ProjectsTab({
+  projects,
+  sections,
+  onProjectsChange,
+  onSectionsChange,
+  onOpenDetail,
+  onOpenActivities,
+  onOpenTrello,
+}: Props) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [runningProjectIds, setRunningProjectIds] = useState<Set<string>>(new Set());
   const [stoppingProjectIds, setStoppingProjectIds] = useState<Set<string>>(new Set());
@@ -107,6 +117,7 @@ export function ProjectsTab({ projects, sections, onProjectsChange, onSectionsCh
     const offset = step * CASCADE_OFFSET;
     await api.createSection({
       name: 'Nova seção',
+      
       position: { x: 40 + offset, y: 40 + offset, width: 320, height: 220 },
       projectIds: [],
     });
@@ -145,6 +156,14 @@ export function ProjectsTab({ projects, sections, onProjectsChange, onSectionsCh
     await onSectionsChange();
   }
 
+  async function handleDeleteProject(projectId: string) {
+    const project = projects.find((p) => p.id === projectId);
+    const name = project?.name ?? 'este projeto';
+    if (!confirm(`Excluir o projeto "${name}"? Isso não apaga as pastas em disco, só o cadastro.`)) return;
+    await api.deleteProject(projectId);
+    await Promise.all([onProjectsChange(), onSectionsChange()]);
+  }
+
   async function handleDropUnassigned(projectId: string) {
     const updates: Promise<unknown>[] = [];
     for (const s of sections) {
@@ -179,6 +198,9 @@ export function ProjectsTab({ projects, sections, onProjectsChange, onSectionsCh
             projects={projects}
             getStatus={getStatus}
             onOpenDetail={onOpenDetail}
+            onOpenActivities={onOpenActivities}
+            onOpenTrello={onOpenTrello}
+            onDeleteProject={handleDeleteProject}
             onPositionChange={handlePositionChange}
             onDropProject={handleDropProject}
             onRename={handleRename}
@@ -206,7 +228,15 @@ export function ProjectsTab({ projects, sections, onProjectsChange, onSectionsCh
         )}
         <div className="unassigned-list">
           {unassignedProjects.map((p) => (
-            <ProjectCard key={p.id} project={p} status={getStatus(p.id)} onOpenDetail={onOpenDetail} />
+            <ProjectCard
+              key={p.id}
+              project={p}
+              status={getStatus(p.id)}
+              onOpenDetail={onOpenDetail}
+              onOpenActivities={onOpenActivities}
+              onOpenTrello={onOpenTrello}
+              onDelete={handleDeleteProject}
+            />
           ))}
         </div>
       </div>

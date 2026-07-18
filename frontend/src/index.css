@@ -85,7 +85,7 @@ button {
   color: white;
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn.btn-primary:hover:not(:disabled) {
   opacity: 0.9;
   color: white;
 }
@@ -338,6 +338,13 @@ button {
   flex: 1;
 }
 
+.project-card-actions .btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+}
+
 /* Modal */
 
 .modal-overlay {
@@ -470,6 +477,182 @@ button {
 .folder-path {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.activity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.activity-status-running {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.activity-status-paused {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
+.activity-prompt {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+
+.activity-related {
+  margin: 6px 0 0;
+}
+
+.activity-origin-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: normal;
+}
+
+.activity-origin-choice label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.activity-steps {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activity-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.activity-step-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.activity-step-done {
+  color: var(--success);
+}
+
+.activity-step-done + span {
+  color: var(--text-muted);
+}
+
+.activity-step-in-progress {
+  color: var(--accent);
+  animation: activity-step-spin 1s linear infinite;
+}
+
+.activity-step-in-progress + span {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.activity-step-pending {
+  color: var(--text-muted);
+}
+
+@keyframes activity-step-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mention-textarea {
+  position: relative;
+}
+
+.mention-textarea textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.mention-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 2px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.mention-suggestions li + li {
+  margin-top: 2px;
+}
+
+.mention-suggestions button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.mention-suggestions button:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.activity-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.activity-actions .btn {
+  font-size: 12px;
+  padding: 4px 8px;
 }
 
 a.btn {

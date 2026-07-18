@@ -2,10 +2,10 @@
   {
     "name": "Selava",
     "position": {
-      "x": 40.0,
-      "y": 39.875,
+      "x": 9.97269,
+      "y": 16.1953,
       "width": 550.0,
-      "height": 220.0
+      "height": 140.0
     },
     "projectIds": [
       "proj-5dbb314f",
@@ -14,14 +14,31 @@
     "id": "sec-e2251be7"
   },
   {
+    "name": "Ressona",
+    "position": {
+      "x": 567.152,
+      "y": 14.8438,
+      "width": 550.0,
+      "height": 140.0
+    },
+    "projectIds": [
+      "proj-a27fca3f",
+      "proj-2450966d"
+    ],
+    "id": "sec-9c7b41db"
+  },
+  {
     "name": "Nova seção",
     "position": {
-      "x": 614.484,
-      "y": 36.2969,
-      "width": 320.0,
-      "height": 220.0
+      "x": 11.3633,
+      "y": 164.438,
+      "width": 550.0,
+      "height": 140.0
     },
-    "projectIds": [],
-    "id": "sec-9c7b41db"
+    "projectIds": [
+      "proj-cd01ee0d",
+      "proj-af5b50cf"
+    ],
+    "id": "sec-b1e4779d"
   }
 ]

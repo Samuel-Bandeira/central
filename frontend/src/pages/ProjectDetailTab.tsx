@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client';
-import type { Folder, Project, TrelloCards, TrelloSummary } from '../types';
+import type { Folder, Project } from '../types';
+import { DevBranchSelect } from '../components/DevBranchSelect';
 import { FolderListEditor } from '../components/FolderListEditor';
 
 interface Props {
@@ -34,21 +35,10 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project?.name ?? '');
   const [folders, setFolders] = useState<Folder[]>(project?.folders ?? []);
-  const [trelloBoardUrl, setTrelloBoardUrl] = useState(project?.trelloBoardUrl ?? '');
   const [runCommand, setRunCommand] = useState(project?.runCommand ?? '');
+  const [devBranch, setDevBranch] = useState(project?.devBranch ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [summary, setSummary] = useState<TrelloSummary | null>(null);
-  const [cards, setCards] = useState<TrelloCards | null>(null);
-
-  const projectId = project?.id ?? null;
-
-  useEffect(() => {
-    if (!projectId) return;
-    api.getTrelloSummary(projectId).then(setSummary);
-    api.getTrelloCards(projectId).then(setCards);
-  }, [projectId]);
 
   if (!project) {
     return <p className="pending-note">Este projeto foi removido.</p>;
@@ -57,8 +47,8 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
   function startEditing() {
     setName(project!.name);
     setFolders(project!.folders);
-    setTrelloBoardUrl(project!.trelloBoardUrl ?? '');
     setRunCommand(project!.runCommand ?? '');
+    setDevBranch(project!.devBranch ?? '');
     setError(null);
     setEditing(true);
   }
@@ -68,14 +58,18 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
       setError('O nome do projeto é obrigatório');
       return;
     }
+    if (!devBranch.trim()) {
+      setError('A branch de desenvolvimento é obrigatória');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await api.updateProject(project!.id, {
         name: name.trim(),
         folders: folders.filter((f) => f.name.trim() && f.path.trim()),
-        trelloBoardUrl: trelloBoardUrl.trim() || undefined,
         runCommand: runCommand.trim() || undefined,
+        devBranch: devBranch.trim(),
       });
       await onProjectsChange();
       setEditing(false);
@@ -102,8 +96,12 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
         </label>
         <FolderListEditor folders={folders} onChange={setFolders} />
         <label className="field">
-          Link do board no Trello
-          <input value={trelloBoardUrl} onChange={(e) => setTrelloBoardUrl(e.target.value)} placeholder="https://trello.com/b/..." />
+          Branch de desenvolvimento
+          <DevBranchSelect folderPath={folders[0]?.path.trim() || undefined} value={devBranch} onChange={setDevBranch} />
+          <span className="field-hint">
+            Obrigatória — é a partir dela que as atividades com Claude criam a branch de cada tarefa. Sem isso, não dá
+            pra iniciar atividades neste projeto.
+          </span>
         </label>
         <label className="field">
           Comando de execução
@@ -160,55 +158,22 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
       </section>
 
       <section className="detail-section">
+        <h2>Branch de desenvolvimento</h2>
+        {project.devBranch ? (
+          <pre className="run-command-view">{project.devBranch}</pre>
+        ) : (
+          <p className="pending-note field-error">
+            Não configurada — não é possível iniciar atividades neste projeto sem isso.
+          </p>
+        )}
+      </section>
+
+      <section className="detail-section">
         <h2>Comando de execução</h2>
         {project.runCommand ? (
           <pre className="run-command-view">{project.runCommand}</pre>
         ) : (
           <p className="pending-note">Não configurado — a seção não conseguirá iniciar este projeto (item 8 do arquitetura.md).</p>
-        )}
-      </section>
-
-      <section className="detail-section">
-        <h2>Resumo do Trello</h2>
-        {!summary?.integrated ? (
-          <p className="pending-note">Integração com Trello ainda não implementada.</p>
-        ) : (
-          <ul>
-            {summary.lists.map((list) => (
-              <li key={list.name}>
-                {list.name}: {list.cardCount}
-              </li>
-            ))}
-          </ul>
-        )}
-        <a
-          className={`btn ${project.trelloBoardUrl ? '' : 'btn-link-disabled'}`}
-          href={project.trelloBoardUrl ?? undefined}
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={!project.trelloBoardUrl}
-          onClick={(e) => {
-            if (!project.trelloBoardUrl) e.preventDefault();
-          }}
-        >
-          Abrir no Trello
-        </a>
-      </section>
-
-      <section className="detail-section">
-        <h2>Cards</h2>
-        {!cards?.integrated ? (
-          <p className="pending-note">Integração com Trello ainda não implementada — nenhum card pra listar.</p>
-        ) : cards.cards.length === 0 ? (
-          <p className="pending-note">Nenhum card encontrado.</p>
-        ) : (
-          <ul>
-            {cards.cards.map((card) => (
-              <li key={card.id}>
-                {card.name} — {card.listName}
-              </li>
-            ))}
-          </ul>
         )}
       </section>
     </div>

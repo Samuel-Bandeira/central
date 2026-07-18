@@ -1,6 +1,11 @@
 import type {
+  Activity,
+  ActivityInput,
+  ActivityProgress,
+  ActivityStartResult,
   Project,
   ProjectInput,
+  RunningActivities,
   RunningProjects,
   Section,
   SectionInput,
@@ -61,6 +66,18 @@ export const api = {
   stopSection: (id: string) => request<SectionStopResult>(`/sections/${id}/stop`, { method: 'POST' }),
 
   pickFolder: () => request<{ path: string | null }>('/pick-folder', { method: 'POST' }),
+  getGitBranches: (path: string) => request<{ branches: string[] }>(`/git-branches?path=${encodeURIComponent(path)}`),
   getRunningProjects: () => request<RunningProjects>('/running-projects'),
   openVSCode: (paths: string[]) => request<{ opened: string }>('/open-vscode', { method: 'POST', body: JSON.stringify({ paths }) }),
+
+  listActivities: (projectId: string) => request<Activity[]>(`/projects/${projectId}/activities`),
+  createActivity: (projectId: string, input: ActivityInput) =>
+    request<Activity>(`/projects/${projectId}/activities`, { method: 'POST', body: JSON.stringify(input) }),
+  updateActivity: (id: string, input: Partial<ActivityInput>) =>
+    request<Activity>(`/activities/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  deleteActivity: (id: string) => request<void>(`/activities/${id}`, { method: 'DELETE' }),
+  startActivity: (id: string) => request<ActivityStartResult>(`/activities/${id}/start`, { method: 'POST' }),
+  pauseActivity: (id: string) => request<{ sent: boolean }>(`/activities/${id}/pause`, { method: 'POST' }),
+  getActivityProgress: (id: string) => request<ActivityProgress>(`/activities/${id}/progress`),
+  getRunningActivities: () => request<RunningActivities>('/running-activities'),
 };

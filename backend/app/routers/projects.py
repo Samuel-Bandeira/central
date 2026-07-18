@@ -10,6 +10,7 @@ from ..trello import extract_board_id
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "projects.json"
+SECTIONS_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "sections.json"
 
 
 def _load() -> list[dict]:
@@ -62,6 +63,17 @@ def delete_project(project_id: str) -> None:
     if len(remaining) == len(projects):
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
     _save(remaining)
+
+    # Remove o projeto das seções que o referenciam — senão o id órfão fica
+    # pendurado em sections.json indefinidamente.
+    sections = read_json(SECTIONS_DATA_PATH, [])
+    changed = False
+    for section in sections:
+        if project_id in section["projectIds"]:
+            section["projectIds"] = [pid for pid in section["projectIds"] if pid != project_id]
+            changed = True
+    if changed:
+        write_json_atomic(SECTIONS_DATA_PATH, sections)
 
 
 @router.get("/{project_id}/trello-summary")

@@ -8,6 +8,9 @@ interface Props {
   projects: Project[];
   getStatus: (projectId: string) => ProjectRunStatus;
   onOpenDetail: (project: Project) => void;
+  onOpenActivities: (project: Project) => void;
+  onOpenTrello: (project: Project) => void;
+  onDeleteProject: (projectId: string) => void;
   onPositionChange: (sectionId: string, position: Section['position']) => void;
   onDropProject: (sectionId: string, projectId: string) => void;
   onRename: (sectionId: string, name: string) => void;
@@ -62,6 +65,9 @@ export function SectionBox({
   projects,
   getStatus,
   onOpenDetail,
+  onOpenActivities,
+  onOpenTrello,
+  onDeleteProject,
   onPositionChange,
   onDropProject,
   onRename,
@@ -272,7 +278,15 @@ export function SectionBox({
       <div className="section-body">
         {sectionProjects.length === 0 && <p className="pending-note">Arraste um projeto pra cá</p>}
         {sectionProjects.map((p) => (
-          <ProjectCard key={p.id} project={p} status={getStatus(p.id)} onOpenDetail={onOpenDetail} />
+          <ProjectCard
+            key={p.id}
+            project={p}
+            status={getStatus(p.id)}
+            onOpenDetail={onOpenDetail}
+            onOpenActivities={onOpenActivities}
+            onOpenTrello={onOpenTrello}
+            onDelete={onDeleteProject}
+          />
         ))}
       </div>
       <div className="section-resize-handle" onPointerDown={startResize} />

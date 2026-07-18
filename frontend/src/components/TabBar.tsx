@@ -9,15 +9,24 @@ interface Props {
   onClose: (tabId: string) => void;
 }
 
+const KIND_SUFFIX: Record<Exclude<Tab['kind'], 'projects'>, string> = {
+  detail: '',
+  activities: ' · Claude',
+  trello: ' · Trello',
+};
+
 export function TabBar({ tabs, activeTabId, projects, onSelect, onClose }: Props) {
   return (
     <div className="tabbar">
       {tabs.map((tab) => {
-        const label = tab.kind === 'projects' ? 'Projetos' : projects.find((p) => p.id === tab.projectId)?.name ?? 'Projeto removido';
+        const label =
+          tab.kind === 'projects'
+            ? 'Projetos'
+            : (projects.find((p) => p.id === tab.projectId)?.name ?? 'Projeto removido') + KIND_SUFFIX[tab.kind];
         return (
           <div key={tab.id} className={`tab ${tab.id === activeTabId ? 'tab-active' : ''}`} onClick={() => onSelect(tab.id)}>
             <span>{label}</span>
-            {tab.kind === 'detail' && (
+            {tab.kind !== 'projects' && (
               <button
                 type="button"
                 className="tab-close"

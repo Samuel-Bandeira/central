@@ -20,9 +20,62 @@
         "path": "/Users/samueloliveira/development/4TTIVE/selava-backend/"
       }
     ],
-    "trelloBoardUrl": null,
+    "trelloBoardUrl": "https://trello.com/b/HrzGaXiZ/meu-quadro-do-trello",
     "runCommand": "source venv/bin/activate\n\nuvicorn src.main:app --host 0.0.0.0 --port 8005",
     "id": "proj-2fe61a6f",
+    "trelloBoardId": "HrzGaXiZ"
+  },
+  {
+    "name": "presence-frontend",
+    "folders": [
+      {
+        "name": "presence-frontend",
+        "path": "/Users/samueloliveira/development/RESSONA/presence-frontend/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "npm run dev",
+    "id": "proj-a27fca3f",
+    "trelloBoardId": null,
+    "devBranch": "main"
+  },
+  {
+    "name": "ressona-backend",
+    "folders": [
+      {
+        "name": "ressona-backend",
+        "path": "/Users/samueloliveira/development/RESSONA/ressona-backend/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "docker info >/dev/null 2>&1 || open -a Docker\n\nuntil docker info >/dev/null 2>&1; do sleep 1; done\n\ndocker compose up --build",
+    "id": "proj-2450966d",
+    "trelloBoardId": null
+  },
+  {
+    "name": "zephyr-frontend",
+    "folders": [
+      {
+        "name": "zephyr",
+        "path": "/Users/samueloliveira/development/PULSARES/zephyr/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "npm run dev",
+    "id": "proj-cd01ee0d",
+    "trelloBoardId": null
+  },
+  {
+    "name": "zephyr-backend",
+    "folders": [
+      {
+        "name": "zephyr-backend",
+        "path": "/Users/samueloliveira/development/PULSARES/zephyr-backend/"
+      }
+    ],
+    "trelloBoardUrl": null,
+    "runCommand": "poetry run uvicorn zephyr_backend.main:app --port 8005 --reload",
+    "id": "proj-af5b50cf",
     "trelloBoardId": null
   }
 ]

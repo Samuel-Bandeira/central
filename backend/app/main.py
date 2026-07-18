@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import launchd
-from .routers import filesystem, projects, sections, vscode
+from .routers import activities, filesystem, projects, sections, vscode
 
 app = FastAPI(title="Launcher de Projetos")
 
@@ -17,6 +17,7 @@ app.include_router(projects.router)
 app.include_router(sections.router)
 app.include_router(filesystem.router)
 app.include_router(vscode.router)
+app.include_router(activities.router)
 
 
 @app.get("/health")
