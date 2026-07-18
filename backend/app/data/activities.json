@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "title": "Correção fluxo criação de questões",
+    "prompt": "Será necessário fazer uma modificação na tela de avaliações, hj ao criar uma avaliação no Dialog de criação são criadas todas as questões porém eu gostaria de primeiro criar a avaliação, detalhar e logo após em um aba de questões poder ver um DataTable com as questões e poder add novas, no Dialog pode ser possível add uma questão ou + por vez, o endpoint de questões deve existir como bulk POST e PUT. Por isso será necessário ajustar como está hoje o endpoint de criação (no @ressona-backend ) de avaliação que atualmente espera as questões no seu POST porém agora elas serão add via POST de questões (cujo eu n lembro o nome do endpoint, pode analisar o atual de assesment para pegar essa informação)",
+    "relatedProjectIds": [
+      "proj-2450966d"
+    ],
+    "startFromDevBranch": false,
+    "branchName": "feat/user-selection-process",
+    "id": "act-8daa9fa6",
+    "projectId": "proj-a27fca3f",
+    "started": true,
+    "concluded": true,
+    "mrUrl": "https://gitlab.com/resona3/resona-frontend/-/merge_requests/19",
+    "pausingSinceCommit": null
+  }
+]

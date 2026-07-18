@@ -5,7 +5,7 @@
       "x": 9.97269,
       "y": 16.1953,
       "width": 550.0,
-      "height": 140.0
+      "height": 195.387
     },
     "projectIds": [
       "proj-5dbb314f",
@@ -16,10 +16,10 @@
   {
     "name": "Ressona",
     "position": {
-      "x": 567.152,
-      "y": 14.8438,
-      "width": 550.0,
-      "height": 140.0
+      "x": 570.391,
+      "y": 15.7261,
+      "width": 552.398,
+      "height": 200.359
     },
     "projectIds": [
       "proj-a27fca3f",
@@ -28,12 +28,12 @@
     "id": "sec-9c7b41db"
   },
   {
-    "name": "Nova seção",
+    "name": "Zephyr",
     "position": {
-      "x": 11.3633,
-      "y": 164.438,
+      "x": 11.543,
+      "y": 218.704,
       "width": 550.0,
-      "height": 140.0
+      "height": 193.981
     },
     "projectIds": [
       "proj-cd01ee0d",

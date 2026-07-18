@@ -11,6 +11,7 @@ export interface Project {
   trelloBoardId: string | null;
   runCommand: string | null;
   devBranch: string | null;
+  prodBranch: string | null;
 }
 
 export interface ProjectInput {
@@ -19,6 +20,7 @@ export interface ProjectInput {
   trelloBoardUrl?: string | null;
   runCommand?: string | null;
   devBranch?: string | null;
+  prodBranch?: string | null;
 }
 
 export interface SectionPosition {
@@ -73,6 +75,8 @@ export interface Activity {
   title: string;
   prompt: string;
   started: boolean;
+  concluded: boolean;
+  mrUrl: string | null;
   relatedProjectIds: string[];
   startFromDevBranch: boolean;
   branchName: string;
@@ -95,6 +99,7 @@ export type ActivityStepStatus = 'pending' | 'in_progress' | 'done';
 export interface ActivityStep {
   title: string;
   status: ActivityStepStatus;
+  source?: 'user' | 'claude';
 }
 
 export interface ActivityProgress {
@@ -104,4 +109,10 @@ export interface ActivityProgress {
 export interface ActivityStartResult {
   branch: string;
   resuming: boolean;
+}
+
+export interface ActivityConcludeResult {
+  mrUrl: string;
+  created: boolean;
+  terminalClosed: boolean;
 }

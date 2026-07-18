@@ -95,6 +95,11 @@ button {
   border-color: var(--danger);
 }
 
+.btn-success {
+  color: var(--success);
+  border-color: var(--success);
+}
+
 .pending-note {
   font-size: 13px;
   color: var(--text-muted);
@@ -270,7 +275,7 @@ button {
 /* Card de projeto */
 
 .project-card {
-  width: 210px;
+  min-width: 210px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -292,8 +297,6 @@ button {
 .project-card-name {
   font-weight: 600;
   color: var(--text-h);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -449,6 +452,51 @@ button {
   justify-content: space-between;
 }
 
+.detail-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.git-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  white-space: nowrap;
+}
+
+.detail-header-title .git-status-badge {
+  margin-top: 0;
+}
+
+.git-status-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+}
+
+.git-status-up-to-date {
+  color: var(--success);
+}
+
+.git-status-behind {
+  color: var(--warning);
+}
+
+.project-branches-info {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .detail-section h2 {
   font-size: 16px;
   margin-bottom: 8px;
@@ -516,6 +564,16 @@ button {
 .activity-status-paused {
   color: var(--text-muted);
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
+.activity-status-concluded {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  text-decoration: none;
+}
+
+.activity-status-concluded:hover {
+  text-decoration: underline;
 }
 
 .activity-prompt {
@@ -587,6 +645,37 @@ button {
 
 .activity-step-pending {
   color: var(--text-muted);
+}
+
+.activity-step-delete {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  margin-left: auto;
+}
+
+.activity-step-delete:hover {
+  color: var(--danger);
+}
+
+.activity-add-step {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.activity-add-step input {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
 }
 
 @keyframes activity-step-spin {

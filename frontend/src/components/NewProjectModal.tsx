@@ -13,6 +13,7 @@ export function NewProjectModal({ onClose, onCreate }: Props) {
   const [folders, setFolders] = useState<Folder[]>([{ name: '', path: '' }]);
   const [runCommand, setRunCommand] = useState('');
   const [devBranch, setDevBranch] = useState('');
+  const [prodBranch, setProdBranch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +35,7 @@ export function NewProjectModal({ onClose, onCreate }: Props) {
         folders: folders.filter((f) => f.name.trim() && f.path.trim()),
         runCommand: runCommand.trim() || undefined,
         devBranch: devBranch.trim(),
+        prodBranch: prodBranch.trim() || undefined,
       });
       onClose();
     } catch (err) {
@@ -59,6 +61,12 @@ export function NewProjectModal({ onClose, onCreate }: Props) {
           Branch de desenvolvimento
           <DevBranchSelect folderPath={folders[0]?.path.trim() || undefined} value={devBranch} onChange={setDevBranch} />
           <span className="field-hint">É a partir dela que as atividades com Claude criam a branch de cada tarefa.</span>
+        </label>
+
+        <label className="field">
+          Branch de produção (opcional)
+          <DevBranchSelect folderPath={folders[0]?.path.trim() || undefined} value={prodBranch} onChange={setProdBranch} />
+          <span className="field-hint">Útil pra atividades de bugfix que precisam intervir direto na branch principal.</span>
         </label>
 
         <label className="field">

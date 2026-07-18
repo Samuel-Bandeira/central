@@ -14,8 +14,11 @@ PAUSE_INSTRUCTION = (
     "Pausando por aqui antes de fechar a janela. Antes de encerrar: atualize (ou "
     "crie) o STATUS.md com um resumo de tudo que já foi discutido e decidido "
     "nesta conversa até agora — incluindo perguntas que você fez e minhas "
-    "respostas — o que já foi feito e o que falta. Depois, dê commit e push. Me "
-    "avise por aqui quando terminar; eu fecho esta janela manualmente."
+    "respostas — o que já foi feito e o que falta. O STATUS.md é histórico de "
+    "trabalho local, não deve ir pro repositório — se ele ainda não estiver no "
+    ".gitignore do projeto, adicione uma linha pra ele lá antes de commitar. "
+    "Depois, dê commit e push. Me avise por aqui quando terminar; eu fecho "
+    "esta janela manualmente."
 )
 
 

@@ -1,8 +1,10 @@
+import subprocess
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from .. import git_utils
 from ..schemas import Project, ProjectCreate, ProjectUpdate
 from ..storage import read_json, write_json_atomic
 from ..trello import extract_board_id
@@ -74,6 +76,39 @@ def delete_project(project_id: str) -> None:
             changed = True
     if changed:
         write_json_atomic(SECTIONS_DATA_PATH, sections)
+
+
+@router.get("/{project_id}/git-status")
+def get_git_status(project_id: str) -> dict:
+    """Branch atual do projeto e se está em dia com a branch de
+    desenvolvimento configurada. Não é erro a pasta não ser um repo git
+    (projeto pode nem usar git) nem faltar devBranch — só volta campos
+    nulos nesses casos, em vez de recusar."""
+    projects = _load()
+    project = _find(projects, project_id)
+    if not project["folders"]:
+        return {"currentBranch": None, "devBranch": project.get("devBranch"), "upToDate": None}
+    folder = project["folders"][0]["path"]
+
+    try:
+        current = git_utils.current_branch(folder)
+    except git_utils.GitError:
+        return {"currentBranch": None, "devBranch": project.get("devBranch"), "upToDate": None}
+
+    dev_branch = project.get("devBranch")
+    up_to_date = None
+    if dev_branch:
+        subprocess.run(["git", "-C", folder, "fetch", "--prune"], capture_output=True, text=True)
+        for ref in (f"origin/{dev_branch}", dev_branch):
+            if not git_utils.ref_exists(folder, ref):
+                continue
+            try:
+                up_to_date = git_utils.commits_behind(folder, ref) == 0
+                break
+            except git_utils.GitError:
+                continue
+
+    return {"currentBranch": current, "devBranch": dev_branch, "upToDate": up_to_date}
 
 
 @router.get("/{project_id}/trello-summary")

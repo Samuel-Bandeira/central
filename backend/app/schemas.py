@@ -12,6 +12,7 @@ class ProjectBase(BaseModel):
     trelloBoardUrl: str | None = None
     runCommand: str | None = None
     devBranch: str | None = None
+    prodBranch: str | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -24,6 +25,7 @@ class ProjectUpdate(BaseModel):
     trelloBoardUrl: str | None = None
     runCommand: str | None = None
     devBranch: str | None = None
+    prodBranch: str | None = None
 
 
 class Project(ProjectBase):
@@ -67,14 +69,16 @@ class ActivityBase(BaseModel):
     prompt: str
     relatedProjectIds: list[str] = []
     startFromDevBranch: bool = True
-    # "" pras atividades antigas (criadas antes desse campo existir) — o
-    # backend cai pro nome automático task/<id> nesse caso. Atividades
-    # novas são obrigadas a informar (ver ActivityCreate).
+    # Obrigatório só quando startFromDevBranch=true (validado na rota, não
+    # aqui — Pydantic não faz "obrigatório condicional" direito). Quando
+    # startFromDevBranch=false, a atividade continua na branch que já
+    # estiver ativa — sem nome nenhum escolhido, o próprio backend guarda
+    # aqui qual era ao dar o primeiro "Iniciar", pra retomar depois.
     branchName: str = ""
 
 
 class ActivityCreate(ActivityBase):
-    branchName: str
+    pass
 
 
 class ActivityUpdate(BaseModel):
@@ -85,7 +89,13 @@ class ActivityUpdate(BaseModel):
     branchName: str | None = None
 
 
+class ActivityStepTitle(BaseModel):
+    title: str
+
+
 class Activity(ActivityBase):
     id: str
     projectId: str
     started: bool = False
+    concluded: bool = False
+    mrUrl: str | None = None

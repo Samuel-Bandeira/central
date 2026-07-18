@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FiCheckCircle, FiCircle, FiLoader } from 'react-icons/fi';
+import { FiCheckCircle, FiCircle, FiLoader, FiX } from 'react-icons/fi';
 import { api, ApiError } from '../api/client';
 import type { Activity, ActivityStep, Project } from '../types';
 
@@ -116,29 +116,16 @@ const STEP_ICON = {
 
 // O Claude Code não expõe API/hook pra acompanhar o plano dele de fora —
 // por isso pedimos (via PROGRESS_INSTRUCTION no backend) pra ele mesmo
-// manter um arquivo .claude-activity-status.json no projeto, e só fazemos
-// poll nesse arquivo. Só existe depois que ele escrever a primeira vez.
-function ActivityProgressList({ activityId }: { activityId: string }) {
-  const [steps, setSteps] = useState<ActivityStep[]>([]);
+// manter um arquivo .claude-activity-status.json no projeto, e o pai
+// (ActivitiesPanel) faz poll nesse arquivo e passa os steps como prop —
+// componente sem estado próprio, pra uma adição/exclusão manual refletir
+// na hora, sem esperar o próximo ciclo de poll.
+interface ActivityProgressListProps {
+  steps: ActivityStep[];
+  onDeleteStep?: (title: string) => void;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    async function poll() {
-      try {
-        const { steps: fetched } = await api.getActivityProgress(activityId);
-        if (!cancelled) setSteps(fetched);
-      } catch {
-        // arquivo pode não existir ainda, ou estar no meio de uma escrita — ignora
-      }
-    }
-    poll();
-    const interval = setInterval(poll, PROGRESS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [activityId]);
-
+function ActivityProgressList({ steps, onDeleteStep }: ActivityProgressListProps) {
   if (steps.length === 0) return null;
 
   return (
@@ -147,6 +134,16 @@ function ActivityProgressList({ activityId }: { activityId: string }) {
         <li key={i} className={`activity-step activity-step-${step.status}`}>
           {STEP_ICON[step.status] ?? STEP_ICON.pending}
           <span>{step.title}</span>
+          {step.source === 'user' && (
+            <button
+              type="button"
+              className="activity-step-delete"
+              title="Excluir esse subtask (criado manualmente)"
+              onClick={() => onDeleteStep?.(step.title)}
+            >
+              <FiX />
+            </button>
+          )}
         </li>
       ))}
     </ul>
@@ -186,6 +183,10 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   const [editForm, setEditForm] = useState<FormState>(EMPTY_FORM);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stepsByActivity, setStepsByActivity] = useState<Record<string, ActivityStep[]>>({});
+  const [addingStepFor, setAddingStepFor] = useState<string | null>(null);
+  const [newStepTitle, setNewStepTitle] = useState('');
+  const [savingStep, setSavingStep] = useState(false);
 
   const otherProjects = projects.filter((p) => p.id !== projectId);
   const projectsById = new Map(projects.map((p) => [p.id, p]));
@@ -210,14 +211,41 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     return () => clearInterval(interval);
   }, [refreshRunning]);
 
+  const startedActivityIds = activities.filter((a) => a.started).map((a) => a.id).join(',');
+
+  useEffect(() => {
+    const ids = startedActivityIds ? startedActivityIds.split(',') : [];
+    if (ids.length === 0) return;
+    let cancelled = false;
+    async function pollProgress() {
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const { steps } = await api.getActivityProgress(id);
+            if (!cancelled) setStepsByActivity((prev) => ({ ...prev, [id]: steps }));
+          } catch {
+            // arquivo pode não existir ainda, ou estar no meio de uma escrita — ignora
+          }
+        }),
+      );
+    }
+    pollProgress();
+    const interval = setInterval(pollProgress, PROGRESS_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [startedActivityIds]);
+
   async function handleCreate() {
-    if (!createForm.title.trim() || !createForm.prompt.trim() || !createForm.branchName.trim()) return;
+    if (!createForm.title.trim() || !createForm.prompt.trim()) return;
+    if (createForm.startFromDevBranch && !createForm.branchName.trim()) return;
     await api.createActivity(projectId, {
       title: createForm.title.trim(),
       prompt: createForm.prompt.trim(),
       relatedProjectIds: extractMentionedProjectIds(createForm.prompt, otherProjects),
       startFromDevBranch: createForm.startFromDevBranch,
-      branchName: createForm.branchName.trim(),
+      branchName: createForm.startFromDevBranch ? createForm.branchName.trim() : '',
     });
     setCreateForm(EMPTY_FORM);
     setCreating(false);
@@ -235,13 +263,14 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   }
 
   async function handleSaveEdit(activityId: string) {
-    if (!editForm.title.trim() || !editForm.prompt.trim() || !editForm.branchName.trim()) return;
+    if (!editForm.title.trim() || !editForm.prompt.trim()) return;
+    if (editForm.startFromDevBranch && !editForm.branchName.trim()) return;
     await api.updateActivity(activityId, {
       title: editForm.title.trim(),
       prompt: editForm.prompt.trim(),
       relatedProjectIds: extractMentionedProjectIds(editForm.prompt, otherProjects),
       startFromDevBranch: editForm.startFromDevBranch,
-      branchName: editForm.branchName.trim(),
+      branchName: editForm.startFromDevBranch ? editForm.branchName.trim() : '',
     });
     setEditingId(null);
     await refresh();
@@ -279,6 +308,49 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
       setError(err instanceof ApiError ? err.message : String(err));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleConclude(activity: Activity) {
+    setBusyId(activity.id);
+    setError(null);
+    try {
+      const { terminalClosed } = await api.concludeActivity(activity.id);
+      if (!terminalClosed) {
+        setError('MR aberto, mas não consegui fechar o terminal sozinho — feche manualmente.');
+      }
+      await Promise.all([refresh(), refreshRunning()]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleAddStep(activity: Activity) {
+    const title = newStepTitle.trim();
+    if (!title || savingStep) return;
+    setError(null);
+    setSavingStep(true);
+    try {
+      const { steps } = await api.addActivityStep(activity.id, title);
+      setStepsByActivity((prev) => ({ ...prev, [activity.id]: steps }));
+      setNewStepTitle('');
+      setAddingStepFor(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingStep(false);
+    }
+  }
+
+  async function handleDeleteStep(activity: Activity, title: string) {
+    setError(null);
+    try {
+      const { steps } = await api.deleteActivityStep(activity.id, title);
+      setStepsByActivity((prev) => ({ ...prev, [activity.id]: steps }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
     }
   }
 
@@ -320,19 +392,21 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                 </label>
                 {!activity.started && (
                   <>
-                    <label className="field">
-                      Nome da branch
-                      <input
-                        value={editForm.branchName}
-                        onChange={(e) => setEditForm((f) => ({ ...f, branchName: e.target.value }))}
-                        placeholder="ex: task/corrigir-login"
-                      />
-                    </label>
                     <StartOriginChoice
                       value={editForm.startFromDevBranch}
                       onChange={(startFromDevBranch) => setEditForm((f) => ({ ...f, startFromDevBranch }))}
                       devBranch={currentProjectDevBranch}
                     />
+                    {editForm.startFromDevBranch && (
+                      <label className="field">
+                        Nome da branch
+                        <input
+                          value={editForm.branchName}
+                          onChange={(e) => setEditForm((f) => ({ ...f, branchName: e.target.value }))}
+                          placeholder="ex: task/corrigir-login"
+                        />
+                      </label>
+                    )}
                   </>
                 )}
                 <div className="modal-actions">
@@ -361,12 +435,15 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           const originLabel = !activity.started
             ? activity.startFromDevBranch
               ? `branch ${activity.branchName}, a partir de ${devBranch ?? '?'} (com pull)`
-              : `branch ${activity.branchName}, a partir da branch atual`
+              : 'vai continuar na branch atual do projeto (sem criar branch nova)'
             : `branch: ${activity.branchName}`;
           // Branch de desenvolvimento é obrigatória pra iniciar/retomar
           // qualquer atividade — sem isso o app não sabe de onde a
           // atividade deveria partir.
           const startDisabled = !hasFolders || busy || running || !devBranch;
+          const steps = stepsByActivity[activity.id] ?? [];
+          const allStepsDone = steps.length > 0 && steps.every((s) => s.status === 'done');
+          const canConclude = activity.started && allStepsDone;
 
           return (
             <li key={activity.id} className="activity-item">
@@ -381,9 +458,48 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     {statusLabel}
                   </span>
                 )}
+                {activity.concluded && activity.mrUrl && (
+                  <a className="activity-status activity-status-concluded" href={activity.mrUrl} target="_blank" rel="noreferrer">
+                    Concluída — ver MR
+                  </a>
+                )}
               </div>
               <p className="activity-prompt">{activity.prompt}</p>
-              {activity.started && <ActivityProgressList activityId={activity.id} />}
+              {activity.started && (
+                <ActivityProgressList steps={steps} onDeleteStep={(title) => handleDeleteStep(activity, title)} />
+              )}
+              {activity.started && addingStepFor === activity.id && (
+                <div className="activity-add-step">
+                  <input
+                    autoFocus
+                    value={newStepTitle}
+                    disabled={savingStep}
+                    onChange={(e) => setNewStepTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddStep(activity);
+                      if (e.key === 'Escape' && !savingStep) {
+                        setAddingStepFor(null);
+                        setNewStepTitle('');
+                      }
+                    }}
+                    placeholder="O que falta ajustar?"
+                  />
+                  <button type="button" className="btn btn-primary" disabled={savingStep} onClick={() => handleAddStep(activity)}>
+                    {savingStep ? 'Salvando…' : 'Adicionar'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={savingStep}
+                    onClick={() => {
+                      setAddingStepFor(null);
+                      setNewStepTitle('');
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
               {relatedNames.length > 0 && (
                 <p className="pending-note activity-related">Também mexe em: {relatedNames.join(', ')}</p>
               )}
@@ -411,6 +527,30 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                 >
                   Pausar
                 </button>
+                {canConclude && (
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    disabled={busy}
+                    title="Abre (ou reaproveita) um MR no GitLab e fecha o terminal — todos os passos do checklist já estão concluídos"
+                    onClick={() => handleConclude(activity)}
+                  >
+                    {busy ? '…' : 'Concluir atividade'}
+                  </button>
+                )}
+                {activity.started && addingStepFor !== activity.id && (
+                  <button
+                    type="button"
+                    className="btn"
+                    title="Registra um ajuste pendente no checklist — o 'Continuar' avisa o Claude sobre isso"
+                    onClick={() => {
+                      setAddingStepFor(activity.id);
+                      setNewStepTitle('');
+                    }}
+                  >
+                    + Subtask
+                  </button>
+                )}
                 <button type="button" className="btn" onClick={() => startEditing(activity)}>
                   Editar
                 </button>
@@ -443,20 +583,22 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
               placeholder="O que o Claude deve fazer nessa atividade. Digite @ pra citar outro projeto."
             />
           </label>
-          <label className="field">
-            Nome da branch
-            <input
-              value={createForm.branchName}
-              onChange={(e) => setCreateForm((f) => ({ ...f, branchName: e.target.value }))}
-              placeholder="ex: task/corrigir-login"
-            />
-            <span className="field-hint">Branch que vai ser criada pra essa atividade — escolha um nome, não é gerado sozinho.</span>
-          </label>
           <StartOriginChoice
             value={createForm.startFromDevBranch}
             onChange={(startFromDevBranch) => setCreateForm((f) => ({ ...f, startFromDevBranch }))}
             devBranch={currentProjectDevBranch}
           />
+          {createForm.startFromDevBranch && (
+            <label className="field">
+              Nome da branch
+              <input
+                value={createForm.branchName}
+                onChange={(e) => setCreateForm((f) => ({ ...f, branchName: e.target.value }))}
+                placeholder="ex: task/corrigir-login"
+              />
+              <span className="field-hint">Branch que vai ser criada pra essa atividade — escolha um nome, não é gerado sozinho.</span>
+            </label>
+          )}
           <div className="modal-actions">
             <button type="button" className="btn" onClick={() => { setCreating(false); setCreateForm(EMPTY_FORM); }}>
               Cancelar

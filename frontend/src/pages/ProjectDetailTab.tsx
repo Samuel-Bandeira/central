@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Folder, Project } from '../types';
 import { DevBranchSelect } from '../components/DevBranchSelect';
 import { FolderListEditor } from '../components/FolderListEditor';
+import { GitStatusBadge } from '../components/GitStatusBadge';
 
 interface Props {
   project: Project | null;
@@ -37,6 +38,7 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
   const [folders, setFolders] = useState<Folder[]>(project?.folders ?? []);
   const [runCommand, setRunCommand] = useState(project?.runCommand ?? '');
   const [devBranch, setDevBranch] = useState(project?.devBranch ?? '');
+  const [prodBranch, setProdBranch] = useState(project?.prodBranch ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,7 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
     setFolders(project!.folders);
     setRunCommand(project!.runCommand ?? '');
     setDevBranch(project!.devBranch ?? '');
+    setProdBranch(project!.prodBranch ?? '');
     setError(null);
     setEditing(true);
   }
@@ -70,6 +73,7 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
         folders: folders.filter((f) => f.name.trim() && f.path.trim()),
         runCommand: runCommand.trim() || undefined,
         devBranch: devBranch.trim(),
+        prodBranch: prodBranch.trim() || undefined,
       });
       await onProjectsChange();
       setEditing(false);
@@ -104,6 +108,11 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
           </span>
         </label>
         <label className="field">
+          Branch de produção (opcional)
+          <DevBranchSelect folderPath={folders[0]?.path.trim() || undefined} value={prodBranch} onChange={setProdBranch} />
+          <span className="field-hint">Útil pra atividades de bugfix que precisam intervir direto na branch principal.</span>
+        </label>
+        <label className="field">
           Comando de execução
           <textarea
             className="run-command-input"
@@ -130,7 +139,10 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
   return (
     <div className="detail-tab">
       <div className="detail-header">
-        <h1>{project.name}</h1>
+        <div className="detail-header-title">
+          <h1>{project.name}</h1>
+          <GitStatusBadge projectId={project.id} />
+        </div>
         <div className="toolbar-actions">
           <button type="button" className="btn" onClick={startEditing}>
             Editar
@@ -165,6 +177,15 @@ export function ProjectDetailTab({ project, onProjectsChange }: Props) {
           <p className="pending-note field-error">
             Não configurada — não é possível iniciar atividades neste projeto sem isso.
           </p>
+        )}
+      </section>
+
+      <section className="detail-section">
+        <h2>Branch de produção</h2>
+        {project.prodBranch ? (
+          <pre className="run-command-view">{project.prodBranch}</pre>
+        ) : (
+          <p className="pending-note">Não configurada.</p>
         )}
       </section>
 

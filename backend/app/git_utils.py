@@ -43,6 +43,38 @@ def checkout(folder: str, branch: str) -> None:
     _run(folder, "checkout", "-b", branch)
 
 
+def ref_exists(folder: str, ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", folder, "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True
+    )
+    return result.returncode == 0
+
+
+def commits_behind(folder: str, base_ref: str) -> int:
+    """Quantos commits `base_ref` tem que o HEAD atual não tem — ou seja, o
+    quanto a branch atual está desatualizada em relação a essa referência."""
+    return int(_run(folder, "rev-list", "--count", f"HEAD..{base_ref}"))
+
+
+def remote_url(folder: str) -> str | None:
+    """URL do remoto `origin`, ou `None` se a pasta não tiver um (não
+    levanta `GitError` — não ter remoto é uma situação normal, não um
+    erro)."""
+    result = subprocess.run(
+        ["git", "-C", folder, "remote", "get-url", "origin"], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def push(folder: str, branch: str) -> None:
+    """`git push -u origin <branch>`. Levanta `GitError` se falhar (ex:
+    remoto divergiu e precisa de resolução manual) — quem chama decide
+    como reportar isso."""
+    _run(folder, "push", "-u", "origin", branch)
+
+
 def list_branches(folder: str) -> list[str]:
     """`git fetch --prune` (melhor esforço — ignora erro se não tiver
     remoto configurado) e retorna os nomes de branch conhecidos (locais +

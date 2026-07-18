@@ -21,11 +21,13 @@ interface Props {
 }
 
 // Precisa bater com o layout real dos cards em .section-body (index.css):
-// width do .project-card, gap entre eles, padding do .section-body e a
+// min-width do .project-card, gap entre eles, padding do .section-body e a
 // borda de 1px de cada lado do próprio .section-box (2px, antes esquecida).
-// CARD_SAFETY_MARGIN é uma folga de propósito por item — evita que qualquer
-// diferença de subpixel/arredondamento do layout real deixe a seção estreita
-// demais e quebre a disposição dos cards numa linha só.
+// O card não tem mais width fixo — cresce com o conteúdo (ex: nome de
+// branch comprido), então CARD_WIDTH aqui é só o tamanho típico/mínimo.
+// CARD_SAFETY_MARGIN cobre esse crescimento normal; conteúdo bem mais
+// largo que isso só faz os cards quebrarem em mais de uma linha dentro da
+// seção (degrada bem, não quebra o layout).
 const CARD_WIDTH = 210;
 const CARD_SAFETY_MARGIN = 50;
 const EFFECTIVE_CARD_WIDTH = CARD_WIDTH + CARD_SAFETY_MARGIN;

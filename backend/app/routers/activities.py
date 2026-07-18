@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from .. import claude_terminal, git_utils
-from ..schemas import Activity, ActivityCreate, ActivityUpdate
+from .. import claude_terminal, git_utils, gitlab_client
+from ..schemas import Activity, ActivityCreate, ActivityStepTitle, ActivityUpdate
 from ..storage import read_json, write_json_atomic
 from .projects import _load as _load_projects
 
@@ -29,7 +29,15 @@ PROGRESS_INSTRUCTION = (
     '[{"title": "...", "status": "pending|in_progress|done"}]}, listando os '
     "passos do seu plano. Atualize esse arquivo sempre que definir/ajustar o "
     "plano e sempre que iniciar ou concluir um passo — é assim que um painel "
-    "fora deste terminal acompanha seu progresso. Se o arquivo ainda não "
+    "fora deste terminal acompanha seu progresso. Toda vez que atualizar esse "
+    "arquivo, atualize também o STATUS.md no mesmo momento (não só ao pausar) "
+    "com um resumo do que já foi feito/decidido até ali — assim ele nunca "
+    "fica desatualizado em relação ao progresso real. Alguns steps desse "
+    'arquivo podem vir com "source": "user" — foram adicionados manualmente '
+    "por mim fora deste terminal (pedidos extras depois de eu revisar o "
+    "resultado). Nunca remova esses steps nem apague o campo \"source\" "
+    "deles — só atualize o status conforme for resolvendo. Os demais steps "
+    "(sem esse campo) são seus, gerencie livremente. Se o arquivo ainda não "
     "estiver no .gitignore do projeto, adicione uma linha pra ele lá."
 )
 
@@ -66,6 +74,39 @@ def _project_folder(project_id: str) -> str:
     return project["folders"][0]["path"]
 
 
+def _read_progress(folder: str) -> list[dict]:
+    """Lê o {PROGRESS_FILE_NAME} que a própria atividade mantém (via
+    PROGRESS_INSTRUCTION). Tolera o arquivo não existir ainda ou estar no
+    meio de uma escrita do Claude — nesses casos volta lista vazia em vez
+    de erro."""
+    path = Path(folder) / PROGRESS_FILE_NAME
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    steps = data.get("steps", [])
+    return steps if isinstance(steps, list) else []
+
+
+def _write_progress(folder: str, steps: list[dict]) -> None:
+    write_json_atomic(Path(folder) / PROGRESS_FILE_NAME, {"steps": steps})
+
+
+def _checkout_safely(folder: str, branch: str) -> None:
+    """Troca pra `branch`, recusando a troca (400) se a pasta estiver numa
+    branch diferente com mudança não commitada — mesma trava de segurança
+    usada ao retomar uma atividade."""
+    current = git_utils.current_branch(folder)
+    if current != branch and not git_utils.is_clean(folder):
+        raise HTTPException(
+            status_code=400,
+            detail="A árvore do projeto tem mudanças não commitadas — commite ou descarte antes de trocar de atividade.",
+        )
+    git_utils.checkout(folder, branch)
+
+
 @router.get("/projects/{project_id}/activities", response_model=list[Activity])
 def list_activities(project_id: str) -> list[dict]:
     return [a for a in _load() if a["projectId"] == project_id]
@@ -74,6 +115,11 @@ def list_activities(project_id: str) -> list[dict]:
 @router.post("/projects/{project_id}/activities", response_model=Activity, status_code=201)
 def create_activity(project_id: str, payload: ActivityCreate) -> dict:
     _project_folder(project_id)  # 404 se o projeto não existir
+    if payload.startFromDevBranch and not payload.branchName.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Nome da branch é obrigatório quando a atividade parte da branch de desenvolvimento.",
+        )
     activities = _load()
     activity = payload.model_dump()
     activity["id"] = f"act-{uuid.uuid4().hex[:8]}"
@@ -89,6 +135,11 @@ def update_activity(activity_id: str, payload: ActivityUpdate) -> dict:
     activities = _load()
     activity = _find(activities, activity_id)
     activity.update(payload.model_dump(exclude_unset=True))
+    if activity.get("startFromDevBranch") and not activity.get("branchName", "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Nome da branch é obrigatório quando a atividade parte da branch de desenvolvimento.",
+        )
     _save(activities)
     return activity
 
@@ -159,9 +210,6 @@ def start_activity(activity_id: str) -> dict:
             detail="Configure a branch de desenvolvimento do projeto (em Detalhar → Editar) antes de iniciar atividades.",
         )
     folder = project["folders"][0]["path"]
-    # Nome escolhido na criação da atividade — cai pro automático task/<id>
-    # só pras atividades antigas (criadas antes desse campo existir).
-    branch = activity.get("branchName") or _branch_name(activity_id)
     is_first_start = not activity["started"]
     # Decidido na criação da atividade (não perguntado de novo aqui) —
     # `startFromDevBranch` default true: começa do zero a partir da branch
@@ -169,31 +217,39 @@ def start_activity(activity_id: str) -> dict:
     from_dev_branch = activity.get("startFromDevBranch", True)
 
     try:
-        if is_first_start and from_dev_branch:
-            # Começar do zero a partir da branch de desenvolvimento
-            # configurada, já atualizada — só faz sentido na primeira vez
-            # (a branch da atividade, uma vez criada, já tem sua própria
-            # base; puxar de novo depois bagunçaria o histórico dela).
-            if not git_utils.is_clean(folder):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"A árvore do projeto tem mudanças não commitadas — commite ou descarte antes de trocar pra {dev_branch}.",
-                )
-            git_utils.checkout(folder, dev_branch)
-            git_utils.pull(folder)
-            if branch in git_utils.list_branches(folder):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Já existe uma branch chamada '{branch}' — escolha outro nome pra essa atividade (aba Editar).",
-                )
-
-        current = git_utils.current_branch(folder)
-        if current != branch and not git_utils.is_clean(folder):
-            raise HTTPException(
-                status_code=400,
-                detail="A árvore do projeto tem mudanças não commitadas — commite ou descarte antes de trocar de atividade.",
-            )
-        git_utils.checkout(folder, branch)
+        if is_first_start:
+            if from_dev_branch:
+                # Começar do zero a partir da branch de desenvolvimento
+                # configurada, já atualizada, numa branch com o nome
+                # escolhido na criação — só faz sentido na primeira vez (a
+                # branch da atividade, uma vez criada, já tem sua própria
+                # base; puxar de novo depois bagunçaria o histórico dela).
+                if not git_utils.is_clean(folder):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"A árvore do projeto tem mudanças não commitadas — commite ou descarte antes de trocar pra {dev_branch}.",
+                    )
+                git_utils.checkout(folder, dev_branch)
+                git_utils.pull(folder)
+                branch = activity["branchName"]
+                if branch in git_utils.list_branches(folder):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Já existe uma branch chamada '{branch}' — escolha outro nome pra essa atividade (aba Editar).",
+                    )
+                git_utils.checkout(folder, branch)
+            else:
+                # Continua na branch que já estava ativa — não cria/troca
+                # nada. Guarda qual era, pra "Continuar" no futuro voltar
+                # pro lugar certo mesmo se outra atividade tiver trocado de
+                # branch nesse meio tempo.
+                branch = git_utils.current_branch(folder)
+                activity["branchName"] = branch
+        else:
+            # Retomando: sempre volta pra branch decidida (criada ou
+            # detectada) na primeira vez.
+            branch = activity.get("branchName") or _branch_name(activity_id)
+            _checkout_safely(folder, branch)
     except git_utils.GitError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -229,6 +285,24 @@ def start_activity(activity_id: str) -> dict:
         prompt = f"Retomando atividade. Leia o STATUS.md antes de continuar.\n\n{prompt}"
     else:
         prompt = f"{CONFIRMATION_INSTRUCTION}\n\n{prompt}"
+
+    # "Continuar" não pode depender do Claude adivinhar que apareceu um
+    # pedido novo — se o usuário adicionou steps manuais (ou sobrou algo
+    # não concluído da última vez), avisamos explicitamente aqui em vez de
+    # só confiar no checklist ficar lá silenciosamente esperando ser lido.
+    if not is_first_start:
+        pending_steps = [s for s in _read_progress(folder) if s.get("status") != "done"]
+        if pending_steps:
+            pending_notes = "\n".join(
+                f"- {s.get('title', '(sem título)')} (status atual: {s.get('status', 'pending')})"
+                for s in pending_steps
+            )
+            prompt = (
+                "Antes de mais nada, resolva os passos ainda pendentes do checklist desta "
+                "atividade (alguns podem ter sido adicionados manualmente por mim depois da "
+                f"última vez que você rodou):\n{pending_notes}\n\n{prompt}"
+            )
+
     prompt = f"{PROGRESS_INSTRUCTION}\n\n{prompt}"
 
     claude_terminal.open_claude_window(activity_id, folder, prompt, related_folders)
@@ -249,19 +323,45 @@ def get_activity_progress(activity_id: str) -> dict:
     activities = _load()
     activity = _find(activities, activity_id)
     folder = _project_folder(activity["projectId"])
-    path = Path(folder) / PROGRESS_FILE_NAME
-    if not path.exists():
-        return {"steps": []}
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        # Pode estar no meio de uma escrita do próprio Claude — ignora e
-        # tenta de novo no próximo poll, não é um erro real.
-        return {"steps": []}
-    steps = data.get("steps", [])
-    if not isinstance(steps, list):
-        return {"steps": []}
+    return {"steps": _read_progress(folder)}
+
+
+@router.post("/activities/{activity_id}/steps")
+def add_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
+    """Adiciona um passo manual ao checklist de progresso da atividade —
+    marcado com `source: "user"` pra distinguir dos passos que o próprio
+    Claude gerencia (ver PROGRESS_INSTRUCTION: ele é instruído a nunca
+    remover steps com essa marca)."""
+    activities = _load()
+    activity = _find(activities, activity_id)
+    folder = _project_folder(activity["projectId"])
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Título do passo não pode ser vazio.")
+    steps = _read_progress(folder)
+    steps.append({"title": title, "status": "pending", "source": "user"})
+    _write_progress(folder, steps)
     return {"steps": steps}
+
+
+@router.delete("/activities/{activity_id}/steps")
+def delete_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
+    """Remove um passo do checklist — só permite excluir os que foram
+    adicionados manualmente (`source: "user"`); os que o Claude criou como
+    parte do próprio plano não podem ser apagados por aqui."""
+    activities = _load()
+    activity = _find(activities, activity_id)
+    folder = _project_folder(activity["projectId"])
+    steps = _read_progress(folder)
+    for i, step in enumerate(steps):
+        if step.get("title") == payload.title and step.get("source") == "user":
+            del steps[i]
+            _write_progress(folder, steps)
+            return {"steps": steps}
+    raise HTTPException(
+        status_code=404,
+        detail="Esse passo não existe ou não foi criado manualmente — só dá pra excluir os que você mesmo adicionou.",
+    )
 
 
 @router.post("/activities/{activity_id}/pause")
@@ -280,3 +380,74 @@ def pause_activity(activity_id: str) -> dict:
         except git_utils.GitError:
             pass  # sem baseline, a janela só fica aberta esperando fechamento manual
     return {"sent": sent}
+
+
+@router.post("/activities/{activity_id}/conclude")
+def conclude_activity(activity_id: str) -> dict:
+    """Abre (ou reaproveita) um MR no GitLab da branch da atividade pra
+    branch de desenvolvimento do projeto, fecha o terminal do Claude e
+    marca a atividade como concluída. Não trava a atividade — dá pra
+    continuar trabalhando na mesma branch depois e concluir de novo
+    (idempotente: acha o MR já aberto em vez de duplicar)."""
+    activities = _load()
+    activity = _find(activities, activity_id)
+    project = _find_project(_load_projects(), activity["projectId"])
+    if project is None:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    if not project["folders"]:
+        raise HTTPException(status_code=400, detail="Projeto sem pasta cadastrada")
+    dev_branch = project.get("devBranch")
+    if not dev_branch:
+        raise HTTPException(
+            status_code=400,
+            detail="Configure a branch de desenvolvimento do projeto (em Detalhar → Editar) antes de concluir atividades.",
+        )
+    folder = project["folders"][0]["path"]
+
+    steps = _read_progress(folder)
+    if not steps or any(step.get("status") != "done" for step in steps):
+        raise HTTPException(status_code=400, detail="Ainda há passos pendentes no checklist da atividade.")
+
+    branch = activity.get("branchName")
+    if not branch:
+        raise HTTPException(
+            status_code=400, detail="Essa atividade ainda não tem uma branch associada — inicie-a antes."
+        )
+    if branch == dev_branch:
+        raise HTTPException(
+            status_code=400,
+            detail="Essa atividade está na própria branch de desenvolvimento — não há o que abrir de MR.",
+        )
+
+    try:
+        _checkout_safely(folder, branch)
+        if not git_utils.is_clean(folder):
+            raise HTTPException(
+                status_code=400,
+                detail="Há mudanças não commitadas — peça pro Claude commitar (Pausar) antes de concluir.",
+            )
+        git_utils.push(folder, branch)
+    except git_utils.GitError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    try:
+        project_path = gitlab_client.project_path_from_remote(folder)
+    except gitlab_client.GitlabError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        mr = gitlab_client.find_open_mr(project_path, branch)
+        created = False
+        if mr is None:
+            mr = gitlab_client.create_mr(project_path, branch, dev_branch, activity["title"], activity["prompt"])
+            created = True
+    except gitlab_client.GitlabError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    terminal_closed = claude_terminal.close_window(activity_id)
+
+    activity["concluded"] = True
+    activity["mrUrl"] = mr["web_url"]
+    _save(activities)
+
+    return {"mrUrl": mr["web_url"], "created": created, "terminalClosed": terminal_closed}

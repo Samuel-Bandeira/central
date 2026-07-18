@@ -3,6 +3,7 @@ import { FiInfo, FiTrash2 } from 'react-icons/fi';
 import { SiClaudecode, SiTrello } from 'react-icons/si';
 import { VscVscodeOutline } from 'react-icons/vsc';
 import { api } from '../api/client';
+import { GitStatusBadge } from './GitStatusBadge';
 import type { Project } from '../types';
 
 export type ProjectRunStatus = 'running' | 'stopping' | 'stopped';
@@ -57,6 +58,10 @@ export function ProjectCard({ project, status, onOpenDetail, onOpenActivities, o
         <span className="project-card-name">{project.name}</span>
         <span className={`running-dot ${DOT_CLASS[status]}`} title={DOT_TITLE[status]} />
       </div>
+      <GitStatusBadge projectId={project.id} />
+      <p className="project-branches-info">
+        dev: {project.devBranch ?? '—'} · prod: {project.prodBranch ?? '—'}
+      </p>
       <div className="project-card-actions">
         <button
           type="button"

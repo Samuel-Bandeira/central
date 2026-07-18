@@ -37,7 +37,8 @@
     "runCommand": "npm run dev",
     "id": "proj-a27fca3f",
     "trelloBoardId": null,
-    "devBranch": "main"
+    "devBranch": "main",
+    "prodBranch": null
   },
   {
     "name": "ressona-backend",

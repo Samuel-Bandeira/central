@@ -1,5 +1,6 @@
 import type {
   Activity,
+  ActivityConcludeResult,
   ActivityInput,
   ActivityProgress,
   ActivityStartResult,
@@ -53,6 +54,10 @@ export const api = {
   updateProject: (id: string, input: Partial<ProjectInput>) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  getGitStatus: (id: string) =>
+    request<{ currentBranch: string | null; devBranch: string | null; upToDate: boolean | null }>(
+      `/projects/${id}/git-status`,
+    ),
   getTrelloSummary: (id: string) => request<TrelloSummary>(`/projects/${id}/trello-summary`),
   getTrelloCards: (id: string) => request<TrelloCards>(`/projects/${id}/cards`),
 
@@ -78,6 +83,11 @@ export const api = {
   deleteActivity: (id: string) => request<void>(`/activities/${id}`, { method: 'DELETE' }),
   startActivity: (id: string) => request<ActivityStartResult>(`/activities/${id}/start`, { method: 'POST' }),
   pauseActivity: (id: string) => request<{ sent: boolean }>(`/activities/${id}/pause`, { method: 'POST' }),
+  concludeActivity: (id: string) => request<ActivityConcludeResult>(`/activities/${id}/conclude`, { method: 'POST' }),
+  addActivityStep: (id: string, title: string) =>
+    request<ActivityProgress>(`/activities/${id}/steps`, { method: 'POST', body: JSON.stringify({ title }) }),
+  deleteActivityStep: (id: string, title: string) =>
+    request<ActivityProgress>(`/activities/${id}/steps`, { method: 'DELETE', body: JSON.stringify({ title }) }),
   getActivityProgress: (id: string) => request<ActivityProgress>(`/activities/${id}/progress`),
   getRunningActivities: () => request<RunningActivities>('/running-activities'),
 };
