@@ -118,35 +118,54 @@ const STEP_ICON = {
 // por isso pedimos (via PROGRESS_INSTRUCTION no backend) pra ele mesmo
 // manter um arquivo .claude-activity-status.json no projeto, e o pai
 // (ActivitiesPanel) faz poll nesse arquivo e passa os steps como prop —
-// componente sem estado próprio, pra uma adição/exclusão manual refletir
-// na hora, sem esperar o próximo ciclo de poll.
+// componente sem estado próprio (além do toggle de "ver concluídos"), pra
+// uma adição/exclusão manual refletir na hora, sem esperar o próximo ciclo
+// de poll.
 interface ActivityProgressListProps {
   steps: ActivityStep[];
   onDeleteStep?: (title: string) => void;
 }
 
 function ActivityProgressList({ steps, onDeleteStep }: ActivityProgressListProps) {
+  const [showDone, setShowDone] = useState(false);
+
   if (steps.length === 0) return null;
 
+  const pending = steps.filter((s) => s.status !== 'done');
+  const done = steps.filter((s) => s.status === 'done');
+
+  function renderStep(step: ActivityStep, i: number) {
+    return (
+      <li key={i} className={`activity-step activity-step-${step.status}`}>
+        {STEP_ICON[step.status] ?? STEP_ICON.pending}
+        <span>{step.title}</span>
+        {step.source === 'user' && (
+          <button
+            type="button"
+            className="activity-step-delete"
+            title="Excluir esse subtask (criado manualmente)"
+            onClick={() => onDeleteStep?.(step.title)}
+          >
+            <FiX />
+          </button>
+        )}
+      </li>
+    );
+  }
+
   return (
-    <ul className="activity-steps">
-      {steps.map((step, i) => (
-        <li key={i} className={`activity-step activity-step-${step.status}`}>
-          {STEP_ICON[step.status] ?? STEP_ICON.pending}
-          <span>{step.title}</span>
-          {step.source === 'user' && (
-            <button
-              type="button"
-              className="activity-step-delete"
-              title="Excluir esse subtask (criado manualmente)"
-              onClick={() => onDeleteStep?.(step.title)}
-            >
-              <FiX />
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
+    <div className="activity-steps-wrapper">
+      {pending.length > 0 && <ul className="activity-steps">{pending.map(renderStep)}</ul>}
+      {pending.length === 0 && done.length > 0 && <p className="pending-note">Todos os passos concluídos.</p>}
+      {done.length > 0 && (
+        <>
+          <button type="button" className="activity-steps-toggle" onClick={() => setShowDone((v) => !v)}>
+            {showDone ? 'Ocultar concluídos' : `Ver concluídos (${done.length})`}
+          </button>
+          {showDone && <ul className="activity-steps">{done.map(renderStep)}</ul>}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -187,6 +206,10 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   const [addingStepFor, setAddingStepFor] = useState<string | null>(null);
   const [newStepTitle, setNewStepTitle] = useState('');
   const [savingStep, setSavingStep] = useState(false);
+  // "Em progresso" inclui até as que nunca foram iniciadas — só "Concluída"
+  // de verdade (MR aberto) sai dessa aba. Padrão "progress" porque é o que
+  // importa no dia a dia; "Concluídas" só cresce e é consultada por escolha.
+  const [activityTab, setActivityTab] = useState<'progress' | 'done'>('progress');
 
   const otherProjects = projects.filter((p) => p.id !== projectId);
   const projectsById = new Map(projects.map((p) => [p.id, p]));
@@ -369,8 +392,33 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
 
       {activities.length === 0 && !creating && <p className="pending-note">Nenhuma atividade cadastrada ainda.</p>}
 
+      {activities.length > 0 && (() => {
+        const concludedCount = activities.filter((a) => a.concluded).length;
+        const progressCount = activities.length - concludedCount;
+        return (
+          <div className="activities-tabs">
+            <button
+              type="button"
+              className={`activities-tab ${activityTab === 'progress' ? 'activities-tab-active' : ''}`}
+              onClick={() => setActivityTab('progress')}
+            >
+              Em progresso ({progressCount})
+            </button>
+            <button
+              type="button"
+              className={`activities-tab ${activityTab === 'done' ? 'activities-tab-active' : ''}`}
+              onClick={() => setActivityTab('done')}
+            >
+              Concluídas ({concludedCount})
+            </button>
+          </div>
+        );
+      })()}
+
       <ul className="activity-list">
-        {activities.map((activity) => {
+        {activities
+          .filter((activity) => (activityTab === 'done' ? activity.concluded : !activity.concluded))
+          .map((activity) => {
           const running = runningIds.has(activity.id);
           const busy = busyId === activity.id;
           if (editingId === activity.id) {
@@ -562,6 +610,13 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           );
         })}
       </ul>
+
+      {activities.length > 0 &&
+        activities.filter((a) => (activityTab === 'done' ? a.concluded : !a.concluded)).length === 0 && (
+          <p className="pending-note">
+            {activityTab === 'done' ? 'Nenhuma atividade concluída ainda.' : 'Nenhuma atividade em progresso.'}
+          </p>
+        )}
 
       {creating ? (
         <div className="activity-item">

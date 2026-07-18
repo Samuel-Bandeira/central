@@ -476,6 +476,11 @@ button {
   margin-top: 0;
 }
 
+.git-status-loading {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .git-status-icon {
   flex-shrink: 0;
   width: 13px;
@@ -601,6 +606,52 @@ button {
   align-items: center;
   gap: 6px;
   cursor: pointer;
+}
+
+.activities-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.activities-tab {
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.activities-tab:hover:not(.activities-tab-active) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.activities-tab-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.activity-steps-wrapper {
+  margin-top: 8px;
+}
+
+.activity-steps-toggle {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.activity-steps-toggle:hover {
+  text-decoration: underline;
 }
 
 .activity-steps {

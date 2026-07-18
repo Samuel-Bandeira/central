@@ -37,7 +37,11 @@ export function GitStatusBadge({ projectId }: Props) {
     };
   }, [projectId]);
 
-  if (!status?.currentBranch) return null;
+  if (status === null) {
+    return <span className="git-status-badge git-status-loading">Carregando branch…</span>;
+  }
+
+  if (!status.currentBranch) return null;
 
   return (
     <span
