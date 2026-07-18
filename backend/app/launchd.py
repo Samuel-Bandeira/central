@@ -49,7 +49,11 @@ def write_plist(project_id: str, run_command: str, working_directory: str | None
     data: dict = {
         "Label": agent_label(project_id),
         "ProgramArguments": [shell, "-lc", command],
-        "RunAtLoad": True,
+        # Sem RunAtLoad: os processos de projeto só devem subir quando o
+        # usuário clicar Play (bootstrap explícito), nunca sozinhos no
+        # boot/login. Autostart de verdade é só pros com.central-launcher.*
+        # (o app em si), não pros projetos individuais.
+        "RunAtLoad": False,
         "StandardOutPath": str(log_file),
         "StandardErrorPath": str(log_file),
     }
