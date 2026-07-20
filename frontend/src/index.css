@@ -650,6 +650,7 @@ button {
 
 .activity-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -659,6 +660,7 @@ button {
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
+  width: fit-content;
 }
 
 .activity-status-running {
@@ -770,9 +772,20 @@ button {
 
 .activity-step {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   font-size: 13px;
+}
+
+.activity-step-icon {
+  margin-top: 1px;
+}
+
+.activity-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .activity-step-icon {
@@ -820,6 +833,8 @@ button {
 
 .activity-add-step {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-top: 8px;
 }
@@ -906,6 +921,84 @@ button {
   display: block;
   width: 100%;
   box-sizing: border-box;
+}
+
+.mention-textarea-drag-over textarea {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.attachment-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.attachment-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.attachment-thumbnails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachment-thumbnail {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.attachment-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-thumbnail-pending {
+  opacity: 0.85;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.attachment-remove:hover {
+  background: var(--danger);
+}
+
+.attachment-thumbnails-readonly {
+  margin-top: 6px;
+}
+
+.attachment-thumbnails-readonly .attachment-thumbnail {
+  width: 40px;
+  height: 40px;
 }
 
 .mention-suggestions {

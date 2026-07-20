@@ -76,7 +76,15 @@ def is_waiting_for_input(activity_id: str) -> bool:
     to interrupt" nos últimos caracteres visíveis == precisa de você.
     Inerentemente frágil (texto de UI de terceiro, muda entre versões do
     CLI) — se parar de bater, é aqui que ajustar. Retorna False se a
-    janela não existe ou não deu pra ler o conteúdo (nada a indicar)."""
+    janela não existe ou não deu pra ler o conteúdo (nada a indicar).
+
+    Exceção: quando o Claude dispara um agente em background e fica só
+    aguardando a notificação de conclusão, o rodapé "esc to interrupt"
+    some (não tem geração ativa), mas ele não está parado esperando você —
+    está esperando o subagente. Esse estado imprime "Waiting for N
+    background agent(s) to finish", então tratamos essa string como sinal
+    de "ainda ocupado" e caímos de volta na heurística padrão se ela não
+    aparecer."""
     window_ids = _load_window_ids()
     window_id = window_ids.get(activity_id)
     if window_id is None or not _window_exists(window_id):
@@ -86,7 +94,11 @@ def is_waiting_for_input(activity_id: str) -> bool:
     if result.returncode != 0:
         return False
     tail = result.stdout[-4000:]
-    return "esc to interrupt" not in tail
+    if "esc to interrupt" in tail:
+        return False
+    if "background agent" in tail and "Waiting for" in tail:
+        return False
+    return True
 
 
 def open_claude_window(activity_id: str, folder: str, prompt: str, related_folders: list[str] | None = None) -> None:

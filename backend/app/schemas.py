@@ -77,6 +77,12 @@ class ActivityBase(BaseModel):
     title: str
     prompt: str
     acceptanceCriteria: list[AcceptanceCriterion] = []
+    # Caminhos absolutos de imagens anexadas ao prompt (salvas via
+    # POST/DELETE /activities/{id}/attachments) — o Claude Code não recebe
+    # binário no prompt, então essa lista é reinjetada como texto (caminhos
+    # de arquivo) em start_activity, e ele lê cada uma com sua própria
+    # ferramenta de leitura.
+    attachments: list[str] = []
     relatedProjectIds: list[str] = []
     startFromDevBranch: bool = True
     # Obrigatório só quando startFromDevBranch=true (validado na rota, não
@@ -108,6 +114,10 @@ class ActivityUpdate(BaseModel):
 
 class ActivityStepTitle(BaseModel):
     title: str
+
+
+class ActivityAttachmentPath(BaseModel):
+    path: str
 
 
 class Activity(ActivityBase):

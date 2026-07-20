@@ -27,11 +27,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+async function handleResponse<T>(res: Response, method: string, path: string): Promise<T> {
   if (!res.ok) {
     let body: unknown = null;
     try {
@@ -40,11 +36,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       // corpo não era JSON, segue com body null
     }
     const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : body;
-    const message = typeof detail === 'string' ? detail : `${options?.method ?? 'GET'} ${path} falhou (${res.status})`;
+    const message = typeof detail === 'string' ? detail : `${method} ${path} falhou (${res.status})`;
     throw new ApiError(res.status, detail, message);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  return handleResponse<T>(res, options?.method ?? 'GET', path);
+}
+
+// Sem 'Content-Type' explícito — o browser define o boundary do multipart
+// sozinho a partir do FormData, e sobrescrever isso quebra o parse no
+// backend.
+async function requestMultipart<T>(path: string, method: string, formData: FormData): Promise<T> {
+  const res = await fetch(path, { method, body: formData });
+  return handleResponse<T>(res, method, path);
 }
 
 export const api = {
@@ -87,10 +99,22 @@ export const api = {
   startActivity: (id: string) => request<ActivityStartResult>(`/activities/${id}/start`, { method: 'POST' }),
   pauseActivity: (id: string) => request<{ sent: boolean }>(`/activities/${id}/pause`, { method: 'POST' }),
   concludeActivity: (id: string) => request<ActivityConcludeResult>(`/activities/${id}/conclude`, { method: 'POST' }),
-  addActivityStep: (id: string, title: string) =>
-    request<ActivityProgress>(`/activities/${id}/steps`, { method: 'POST', body: JSON.stringify({ title }) }),
+  addActivityStep: (id: string, title: string, files: File[] = []) => {
+    const formData = new FormData();
+    formData.set('title', title);
+    files.forEach((file) => formData.append('files', file));
+    return requestMultipart<ActivityProgress>(`/activities/${id}/steps`, 'POST', formData);
+  },
   deleteActivityStep: (id: string, title: string) =>
     request<ActivityProgress>(`/activities/${id}/steps`, { method: 'DELETE', body: JSON.stringify({ title }) }),
   getActivityProgress: (id: string) => request<ActivityProgress>(`/activities/${id}/progress`),
   getRunningActivities: () => request<RunningActivities>('/running-activities'),
+
+  uploadActivityAttachments: (id: string, files: File[]) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+    return requestMultipart<{ attachments: string[] }>(`/activities/${id}/attachments`, 'POST', formData);
+  },
+  deleteActivityAttachment: (id: string, path: string) =>
+    request<{ attachments: string[] }>(`/activities/${id}/attachments`, { method: 'DELETE', body: JSON.stringify({ path }) }),
 };

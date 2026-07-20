@@ -2,10 +2,12 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
+from .. import attachments as attachments_store
 from .. import claude_terminal, git_utils, gitlab_client
-from ..schemas import Activity, ActivityCreate, ActivityStepTitle, ActivityUpdate
+from ..schemas import Activity, ActivityAttachmentPath, ActivityCreate, ActivityStepTitle, ActivityUpdate
 from ..storage import read_json, write_json_atomic
 from .projects import _load as _load_projects
 
@@ -177,6 +179,61 @@ def delete_activity(activity_id: str) -> None:
     _save(remaining)
 
 
+async def _save_uploaded_images(scope: str, files: list[UploadFile]) -> list[str]:
+    """Valida (só imagem) e salva cada upload, devolvendo os caminhos
+    absolutos salvos — compartilhado entre o anexo do prompt e o anexo de
+    subtask, que só diferem no `scope` (subpasta) usado."""
+    saved: list[str] = []
+    for file in files:
+        if file.content_type not in attachments_store.ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{file.filename}' não é uma imagem suportada (png, jpeg, gif ou webp).",
+            )
+        content = await file.read()
+        saved.append(attachments_store.save_image(scope, file.filename or "imagem", content))
+    return saved
+
+
+@router.get("/attachments/file")
+def serve_attachment(path: str) -> FileResponse:
+    """Serve a imagem salva pra pré-visualização no frontend — o Claude lê
+    o arquivo direto do disco, isso aqui é só pra UI mostrar a miniatura.
+    Recusa qualquer caminho fora de ATTACHMENTS_DIR (evita virar leitor de
+    arquivo arbitrário do disco)."""
+    if not attachments_store.is_within_attachments_dir(path):
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    file_path = Path(path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    return FileResponse(file_path)
+
+
+@router.post("/activities/{activity_id}/attachments")
+async def upload_activity_attachments(activity_id: str, files: list[UploadFile] = File(...)) -> dict:
+    activities = _load()
+    activity = _find(activities, activity_id)
+    saved = await _save_uploaded_images(activity_id, files)
+    activity.setdefault("attachments", [])
+    activity["attachments"].extend(saved)
+    _save(activities)
+    return {"attachments": activity["attachments"]}
+
+
+@router.delete("/activities/{activity_id}/attachments")
+def delete_activity_attachment(activity_id: str, payload: ActivityAttachmentPath) -> dict:
+    activities = _load()
+    activity = _find(activities, activity_id)
+    current = activity.get("attachments", [])
+    remaining = [p for p in current if p != payload.path]
+    if len(remaining) == len(current):
+        raise HTTPException(status_code=404, detail="Anexo não encontrado nessa atividade")
+    attachments_store.delete_image(payload.path)
+    activity["attachments"] = remaining
+    _save(activities)
+    return {"attachments": remaining}
+
+
 @router.get("/running-activities")
 def running_activities() -> dict:
     activities = _load()
@@ -339,6 +396,16 @@ def start_activity(activity_id: str) -> dict:
     # os campos abaixo refletem a situação real do STATUS.md).
     resuming = activity["started"] and (Path(folder) / "STATUS.md").exists()
     prompt = activity["prompt"]
+    # Imagens anexadas ao prompt (upload via POST /activities/{id}/attachments)
+    # — o Claude não recebe binário no prompt, só o caminho de cada arquivo,
+    # que ele lê sozinho com a própria ferramenta de leitura.
+    attachment_paths = activity.get("attachments", [])
+    if attachment_paths:
+        attachment_list = "\n".join(f"- {p}" for p in attachment_paths)
+        prompt = (
+            "Imagens anexadas a esta atividade — leia cada uma (com sua ferramenta de "
+            f"leitura de arquivo) antes de começar:\n{attachment_list}\n\n{prompt}"
+        )
     # Só os ainda não confirmados — um critério marcado `met` foi decisão
     # minha (fora deste terminal), não precisa voltar a ocupar espaço no
     # prompt toda vez que a atividade é retomada.
@@ -364,10 +431,15 @@ def start_activity(activity_id: str) -> dict:
     if not is_first_start:
         pending_steps = [s for s in _read_progress(folder, activity_id) if s.get("status") != "done"]
         if pending_steps:
-            pending_notes = "\n".join(
-                f"- {s.get('title', '(sem título)')} (status atual: {s.get('status', 'pending')})"
-                for s in pending_steps
-            )
+            def _step_note(s: dict) -> str:
+                note = f"- {s.get('title', '(sem título)')} (status atual: {s.get('status', 'pending')})"
+                step_attachments = s.get("attachments", [])
+                if step_attachments:
+                    images = ", ".join(step_attachments)
+                    note += f"\n  Imagens anexadas a este passo (leia antes de resolvê-lo): {images}"
+                return note
+
+            pending_notes = "\n".join(_step_note(s) for s in pending_steps)
             prompt = (
                 "Antes de mais nada, resolva os passos ainda pendentes do checklist desta "
                 "atividade (alguns podem ter sido adicionados manualmente por mim depois da "
@@ -398,19 +470,27 @@ def get_activity_progress(activity_id: str) -> dict:
 
 
 @router.post("/activities/{activity_id}/steps")
-def add_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
+async def add_activity_step(
+    activity_id: str, title: str = Form(...), files: list[UploadFile] = File(default=[])
+) -> dict:
     """Adiciona um passo manual ao checklist de progresso da atividade —
     marcado com `source: "user"` pra distinguir dos passos que o próprio
     Claude gerencia (ver `_progress_instruction`: ele é instruído a nunca
-    remover steps com essa marca)."""
+    remover steps com essa marca). Aceita imagens junto (multipart, não
+    JSON) — salvas numa subpasta própria do step dentro do escopo da
+    atividade, reinjetadas no prompt em `start_activity` quando o passo
+    ainda estiver pendente."""
     activities = _load()
     activity = _find(activities, activity_id)
     folder = _project_folder(activity["projectId"])
-    title = payload.title.strip()
+    title = title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Título do passo não pode ser vazio.")
     steps = _read_progress(folder, activity_id)
-    steps.append({"title": title, "status": "pending", "source": "user"})
+    step: dict = {"title": title, "status": "pending", "source": "user"}
+    if files:
+        step["attachments"] = await _save_uploaded_images(f"{activity_id}/steps", files)
+    steps.append(step)
     _write_progress(folder, activity_id, steps)
     return {"steps": steps}
 
@@ -426,6 +506,8 @@ def delete_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
     steps = _read_progress(folder, activity_id)
     for i, step in enumerate(steps):
         if step.get("title") == payload.title and step.get("source") == "user":
+            for attachment_path in step.get("attachments", []):
+                attachments_store.delete_image(attachment_path)
             del steps[i]
             _write_progress(folder, activity_id, steps)
             return {"steps": steps}

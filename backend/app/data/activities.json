@@ -21,15 +21,15 @@
     "acceptanceCriteria": [
       {
         "text": "campo de add imagem na criação da questão",
-        "met": false
+        "met": true
       },
       {
         "text": "ver imagem no detalhamento da questão",
-        "met": false
+        "met": true
       },
       {
         "text": "ver imagem durante o mooc",
-        "met": false
+        "met": true
       }
     ],
     "relatedProjectIds": [
@@ -43,6 +43,12 @@
     "started": true,
     "relatedBranchNames": {
       "proj-2450966d": "feature/analyst-onboarding"
+    },
+    "pausingSinceCommit": null,
+    "concluded": true,
+    "mrUrl": "https://gitlab.com/resona3/resona-frontend/-/merge_requests/20",
+    "relatedMrUrls": {
+      "proj-2450966d": "https://gitlab.com/davydmelo/ressona-backend/-/merge_requests/15"
     }
   }
 ]

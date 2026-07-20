@@ -12,6 +12,7 @@ const apiProxy = {
   '/sections': 'http://127.0.0.1:8010',
   '/activities': 'http://127.0.0.1:8010',
   '/running-activities': 'http://127.0.0.1:8010',
+  '/attachments': 'http://127.0.0.1:8010',
   '/pick-folder': 'http://127.0.0.1:8010',
   '/git-branches': 'http://127.0.0.1:8010',
   '/running-projects': 'http://127.0.0.1:8010',

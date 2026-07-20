@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FiCheckCircle, FiCheckSquare, FiCircle, FiLoader, FiSquare, FiX } from 'react-icons/fi';
+import { FiCheckCircle, FiCheckSquare, FiCircle, FiImage, FiLoader, FiSquare, FiX } from 'react-icons/fi';
 import { api, ApiError } from '../api/client';
+import { attachmentUrl } from '../types';
 import type { AcceptanceCriterion, Activity, ActivityConcludeResult, ActivityStep, Project } from '../types';
 
 const RUNNING_POLL_INTERVAL_MS = 5000;
@@ -20,6 +21,13 @@ interface FormState {
   startFromDevBranch: boolean;
   branchName: string;
   relatedStartFromDevBranch: boolean;
+  // Já salvos no backend (só existe algo aqui ao editar uma atividade que
+  // já tinha anexo) — remover um desses chama a API na hora.
+  attachments: string[];
+  // Selecionados agora, ainda não enviados — enviados de fato só quando o
+  // form é salvo (Criar/Salvar), porque na criação a atividade ainda nem
+  // tem id pra anexar nada antes disso.
+  pendingFiles: File[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -29,7 +37,21 @@ const EMPTY_FORM: FormState = {
   startFromDevBranch: true,
   branchName: '',
   relatedStartFromDevBranch: true,
+  attachments: [],
+  pendingFiles: [],
 };
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/');
+}
+
+// Imagens do clipboard (colar) e do arraste (drag&drop) chegam por
+// caminhos diferentes do DOM — este helper padroniza os dois em File[],
+// filtrando só o que é imagem (o resto do drop pode ser texto, link etc).
+function extractImageFiles(source: DataTransfer | null): File[] {
+  if (!source) return [];
+  return Array.from(source.files ?? []).filter(isImageFile);
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -54,11 +76,15 @@ interface MentionTextareaProps {
   candidates: Project[];
   rows: number;
   placeholder?: string;
+  // Mesmo comportamento do chat da claude.ai: colar uma imagem do
+  // clipboard ou arrastar um arquivo pro texto vira anexo, não texto.
+  onImageFiles?: (files: File[]) => void;
 }
 
-function MentionTextarea({ value, onChange, candidates, rows, placeholder }: MentionTextareaProps) {
+function MentionTextarea({ value, onChange, candidates, rows, placeholder, onImageFiles }: MentionTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [query, setQuery] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   function updateQueryFromCursor(text: string, cursor: number) {
     const before = text.slice(0, cursor);
@@ -92,7 +118,7 @@ function MentionTextarea({ value, onChange, candidates, rows, placeholder }: Men
   }
 
   return (
-    <div className="mention-textarea">
+    <div className={`mention-textarea ${dragOver ? 'mention-textarea-drag-over' : ''}`}>
       <textarea
         ref={textareaRef}
         rows={rows}
@@ -101,6 +127,28 @@ function MentionTextarea({ value, onChange, candidates, rows, placeholder }: Men
         onChange={handleChange}
         onKeyUp={(e) => updateQueryFromCursor(e.currentTarget.value, e.currentTarget.selectionStart)}
         onBlur={() => setTimeout(() => setQuery(null), 150)}
+        onPaste={(e) => {
+          const files = extractImageFiles(e.clipboardData);
+          if (files.length > 0 && onImageFiles) {
+            e.preventDefault();
+            onImageFiles(files);
+          }
+        }}
+        onDragOver={(e) => {
+          if (!onImageFiles) return;
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          if (!onImageFiles) return;
+          const files = extractImageFiles(e.dataTransfer);
+          if (files.length > 0) {
+            e.preventDefault();
+            onImageFiles(files);
+          }
+          setDragOver(false);
+        }}
       />
       {query !== null && suggestions.length > 0 && (
         <ul className="mention-suggestions">
@@ -113,6 +161,89 @@ function MentionTextarea({ value, onChange, candidates, rows, placeholder }: Men
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Gera (e revoga ao trocar/desmontar) uma URL de preview local pra cada
+// File ainda não enviado — igual ao chat, a miniatura aparece na hora,
+// antes de qualquer round-trip com o backend.
+function usePendingPreviews(files: File[]): string[] {
+  const [urls, setUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const created = files.map((file) => URL.createObjectURL(file));
+    setUrls(created);
+    return () => created.forEach((url) => URL.revokeObjectURL(url));
+  }, [files]);
+  return urls;
+}
+
+interface AttachmentPickerProps {
+  existing: string[];
+  pendingFiles: File[];
+  onAddFiles: (files: File[]) => void;
+  onRemovePending: (index: number) => void;
+  onRemoveExisting?: (path: string) => void;
+}
+
+// Anexo de imagem no prompt/subtask, com a mesma sensação do chat da
+// claude.ai: miniatura na hora (colar, arrastar ou escolher arquivo) com
+// botão de remover. `existing` só é preenchido ao editar uma atividade que
+// já tinha anexo salvo — na criação, tudo fica em `pendingFiles` até
+// Criar/Salvar (a atividade ainda não tem id pra anexar nada antes disso).
+function AttachmentPicker({ existing, pendingFiles, onAddFiles, onRemovePending, onRemoveExisting }: AttachmentPickerProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingUrls = usePendingPreviews(pendingFiles);
+
+  function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []).filter(isImageFile);
+    if (files.length > 0) onAddFiles(files);
+    e.target.value = '';
+  }
+
+  return (
+    <div className="attachment-picker">
+      {(existing.length > 0 || pendingFiles.length > 0) && (
+        <div className="attachment-thumbnails">
+          {existing.map((path) => (
+            <div key={path} className="attachment-thumbnail">
+              <img src={attachmentUrl(path)} alt="Anexo" />
+              {onRemoveExisting && (
+                <button type="button" className="attachment-remove" aria-label="Remover anexo" onClick={() => onRemoveExisting(path)}>
+                  <FiX size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+          {pendingFiles.map((file, i) => (
+            <div key={`${file.name}-${i}`} className="attachment-thumbnail attachment-thumbnail-pending">
+              {pendingUrls[i] && <img src={pendingUrls[i]} alt={file.name} />}
+              <button type="button" className="attachment-remove" aria-label="Remover anexo" onClick={() => onRemovePending(i)}>
+                <FiX size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={handlePick} />
+      <button type="button" className="btn attachment-picker-btn" onClick={() => inputRef.current?.click()}>
+        <FiImage size={14} /> Anexar imagem
+      </button>
+    </div>
+  );
+}
+
+// Exibição só-leitura no card da atividade/passo já salvo — clica pra
+// abrir em tamanho real numa aba nova.
+function ReadOnlyAttachments({ paths }: { paths: string[] }) {
+  if (paths.length === 0) return null;
+  return (
+    <div className="attachment-thumbnails attachment-thumbnails-readonly">
+      {paths.map((path) => (
+        <a key={path} href={attachmentUrl(path)} target="_blank" rel="noreferrer" className="attachment-thumbnail">
+          <img src={attachmentUrl(path)} alt="Anexo" />
+        </a>
+      ))}
     </div>
   );
 }
@@ -214,7 +345,10 @@ function ActivityProgressList({ steps, onDeleteStep }: ActivityProgressListProps
     return (
       <li key={i} className={`activity-step activity-step-${step.status}`}>
         {STEP_ICON[step.status] ?? STEP_ICON.pending}
-        <span>{step.title}</span>
+        <div className="activity-step-body">
+          <span>{step.title}</span>
+          <ReadOnlyAttachments paths={step.attachments ?? []} />
+        </div>
         {step.source === 'user' && (
           <button
             type="button"
@@ -313,6 +447,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   const [stepsByActivity, setStepsByActivity] = useState<Record<string, ActivityStep[]>>({});
   const [addingStepFor, setAddingStepFor] = useState<string | null>(null);
   const [newStepTitle, setNewStepTitle] = useState('');
+  const [newStepFiles, setNewStepFiles] = useState<File[]>([]);
   const [savingStep, setSavingStep] = useState(false);
   // "Em progresso" inclui até as que nunca foram iniciadas — só "Concluída"
   // de verdade (MR aberto) sai dessa aba. Padrão "progress" porque é o que
@@ -376,7 +511,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   async function handleCreate() {
     if (!createForm.title.trim() || !createForm.prompt.trim()) return;
     if (createForm.startFromDevBranch && !createForm.branchName.trim()) return;
-    await api.createActivity(projectId, {
+    const activity = await api.createActivity(projectId, {
       title: createForm.title.trim(),
       prompt: createForm.prompt.trim(),
       acceptanceCriteria: cleanCriteria(createForm.acceptanceCriteria),
@@ -385,6 +520,11 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
       branchName: createForm.startFromDevBranch ? createForm.branchName.trim() : '',
       relatedStartFromDevBranch: createForm.relatedStartFromDevBranch,
     });
+    // Só dá pra anexar imagem depois de existir um id — a atividade acabou
+    // de nascer na chamada acima.
+    if (createForm.pendingFiles.length > 0) {
+      await api.uploadActivityAttachments(activity.id, createForm.pendingFiles);
+    }
     setCreateForm(EMPTY_FORM);
     setCreating(false);
     await refresh();
@@ -399,6 +539,8 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
       startFromDevBranch: activity.startFromDevBranch,
       branchName: activity.branchName,
       relatedStartFromDevBranch: activity.relatedStartFromDevBranch,
+      attachments: activity.attachments,
+      pendingFiles: [],
     });
   }
 
@@ -414,8 +556,21 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
       branchName: editForm.startFromDevBranch ? editForm.branchName.trim() : '',
       relatedStartFromDevBranch: editForm.relatedStartFromDevBranch,
     });
+    if (editForm.pendingFiles.length > 0) {
+      await api.uploadActivityAttachments(activityId, editForm.pendingFiles);
+    }
     setEditingId(null);
     await refresh();
+  }
+
+  async function handleRemoveAttachment(activityId: string, path: string) {
+    setError(null);
+    try {
+      const { attachments } = await api.deleteActivityAttachment(activityId, path);
+      setEditForm((f) => ({ ...f, attachments }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    }
   }
 
   async function handleToggleCriterion(activity: Activity, index: number) {
@@ -495,9 +650,10 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     setError(null);
     setSavingStep(true);
     try {
-      const { steps } = await api.addActivityStep(activity.id, title);
+      const { steps } = await api.addActivityStep(activity.id, title, newStepFiles);
       setStepsByActivity((prev) => ({ ...prev, [activity.id]: steps }));
       setNewStepTitle('');
+      setNewStepFiles([]);
       setAddingStepFor(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -590,8 +746,16 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     value={editForm.prompt}
                     onChange={(prompt) => setEditForm((f) => ({ ...f, prompt }))}
                     candidates={otherProjects}
+                    onImageFiles={(files) => setEditForm((f) => ({ ...f, pendingFiles: [...f.pendingFiles, ...files] }))}
                   />
-                  <span className="field-hint">Digite @ pra citar outro projeto que também precisa mudar.</span>
+                  <span className="field-hint">Digite @ pra citar outro projeto que também precisa mudar. Cole ou arraste uma imagem pra anexar.</span>
+                  <AttachmentPicker
+                    existing={editForm.attachments}
+                    pendingFiles={editForm.pendingFiles}
+                    onAddFiles={(files) => setEditForm((f) => ({ ...f, pendingFiles: [...f.pendingFiles, ...files] }))}
+                    onRemovePending={(index) => setEditForm((f) => ({ ...f, pendingFiles: f.pendingFiles.filter((_, i) => i !== index) }))}
+                    onRemoveExisting={(path) => handleRemoveAttachment(activity.id, path)}
+                  />
                 </label>
                 <label className="field">
                   Critérios de aceite (opcional)
@@ -708,6 +872,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                   ))}
               </div>
               <p className="activity-prompt">{activity.prompt}</p>
+              <ReadOnlyAttachments paths={activity.attachments} />
               <AcceptanceCriteriaList
                 criteria={activity.acceptanceCriteria}
                 onToggle={(index) => handleToggleCriterion(activity, index)}
@@ -731,6 +896,12 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     }}
                     placeholder="O que falta ajustar?"
                   />
+                  <AttachmentPicker
+                    existing={[]}
+                    pendingFiles={newStepFiles}
+                    onAddFiles={(files) => setNewStepFiles((prev) => [...prev, ...files])}
+                    onRemovePending={(index) => setNewStepFiles((prev) => prev.filter((_, i) => i !== index))}
+                  />
                   <button type="button" className="btn btn-primary" disabled={savingStep} onClick={() => handleAddStep(activity)}>
                     {savingStep ? 'Salvando…' : 'Adicionar'}
                   </button>
@@ -741,6 +912,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     onClick={() => {
                       setAddingStepFor(null);
                       setNewStepTitle('');
+                      setNewStepFiles([]);
                     }}
                   >
                     Cancelar
@@ -842,6 +1014,14 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                 onChange={(prompt) => setCreateForm((f) => ({ ...f, prompt }))}
                 candidates={otherProjects}
                 placeholder="O que o Claude deve fazer nessa atividade. Digite @ pra citar outro projeto."
+                onImageFiles={(files) => setCreateForm((f) => ({ ...f, pendingFiles: [...f.pendingFiles, ...files] }))}
+              />
+              <span className="field-hint">Cole ou arraste uma imagem pra anexar ao prompt.</span>
+              <AttachmentPicker
+                existing={createForm.attachments}
+                pendingFiles={createForm.pendingFiles}
+                onAddFiles={(files) => setCreateForm((f) => ({ ...f, pendingFiles: [...f.pendingFiles, ...files] }))}
+                onRemovePending={(index) => setCreateForm((f) => ({ ...f, pendingFiles: f.pendingFiles.filter((_, i) => i !== index) }))}
               />
             </label>
             <label className="field">

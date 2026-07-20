@@ -81,6 +81,7 @@ export interface Activity {
   title: string;
   prompt: string;
   acceptanceCriteria: AcceptanceCriterion[];
+  attachments: string[];
   started: boolean;
   concluded: boolean;
   mrUrl: string | null;
@@ -113,6 +114,11 @@ export interface ActivityStep {
   title: string;
   status: ActivityStepStatus;
   source?: 'user' | 'claude';
+  attachments?: string[];
+}
+
+export function attachmentUrl(path: string): string {
+  return `/attachments/file?path=${encodeURIComponent(path)}`;
 }
 
 export interface ActivityProgress {
