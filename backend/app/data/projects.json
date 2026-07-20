@@ -51,7 +51,9 @@
     "trelloBoardUrl": null,
     "runCommand": "docker info >/dev/null 2>&1 || open -a Docker\n\nuntil docker info >/dev/null 2>&1; do sleep 1; done\n\ndocker compose up --build",
     "id": "proj-2450966d",
-    "trelloBoardId": null
+    "trelloBoardId": null,
+    "devBranch": "develop",
+    "prodBranch": "master"
   },
   {
     "name": "zephyr-frontend",

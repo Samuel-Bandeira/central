@@ -21,25 +21,49 @@ CONFIRMATION_INSTRUCTION = (
     "entendimento está certo."
 )
 
-PROGRESS_FILE_NAME = ".claude-activity-status.json"
-
-PROGRESS_INSTRUCTION = (
-    f"Ao longo desta atividade, mantenha um arquivo {PROGRESS_FILE_NAME} na raiz "
-    'deste projeto (não do projeto relacionado) no formato {"steps": '
-    '[{"title": "...", "status": "pending|in_progress|done"}]}, listando os '
-    "passos do seu plano. Atualize esse arquivo sempre que definir/ajustar o "
-    "plano e sempre que iniciar ou concluir um passo — é assim que um painel "
-    "fora deste terminal acompanha seu progresso. Toda vez que atualizar esse "
-    "arquivo, atualize também o STATUS.md no mesmo momento (não só ao pausar) "
-    "com um resumo do que já foi feito/decidido até ali — assim ele nunca "
-    "fica desatualizado em relação ao progresso real. Alguns steps desse "
-    'arquivo podem vir com "source": "user" — foram adicionados manualmente '
-    "por mim fora deste terminal (pedidos extras depois de eu revisar o "
-    "resultado). Nunca remova esses steps nem apague o campo \"source\" "
-    "deles — só atualize o status conforme for resolvendo. Os demais steps "
-    "(sem esse campo) são seus, gerencie livremente. Se o arquivo ainda não "
-    "estiver no .gitignore do projeto, adicione uma linha pra ele lá."
+ACCEPTANCE_CRITERIA_INSTRUCTION = (
+    "Estes são os critérios de aceite fixados para esta atividade — o \"pronto\" "
+    "real dela, definido antes de você começar. São diferentes do seu checklist "
+    "de passos (que é o seu plano de execução, livre pra ajustar): os critérios "
+    "abaixo não mudam sem eu concordar, e só eu marco cada um como atendido, "
+    "fora deste terminal — não escreva o status deles em nenhum arquivo. "
+    "Trabalhe até deixar todos satisfeitos, e ao final aponte explicitamente "
+    "como cada um foi endereçado:\n{criteria}"
 )
+
+def _progress_file_name(activity_id: str) -> str:
+    # Nomeado por atividade, não só por projeto — duas atividades podem
+    # rodar na mesma branch/pasta em momentos diferentes (ex: reaproveitar
+    # uma branch antiga), e sem esse sufixo o checklist e o STATUS.md de
+    # uma vazavam pra dentro da outra (bug real reportado pelo usuário,
+    # 2026-07-20: uma atividade nova nasceu já mostrando os passos
+    # concluídos de uma atividade anterior que tinha usado a mesma branch).
+    return f".claude-activity-status-{activity_id}.json"
+
+
+def _progress_instruction(activity_id: str) -> str:
+    file_name = _progress_file_name(activity_id)
+    return (
+        f"Ao longo desta atividade, mantenha um arquivo {file_name} na raiz "
+        'deste projeto (não do projeto relacionado) no formato {"steps": '
+        '[{"title": "...", "status": "pending|in_progress|done"}]}, listando os '
+        "passos do seu plano. Atualize esse arquivo sempre que definir/ajustar o "
+        "plano e sempre que iniciar ou concluir um passo — é assim que um painel "
+        "fora deste terminal acompanha seu progresso. Toda vez que atualizar esse "
+        "arquivo, atualize também o STATUS.md no mesmo momento (não só ao pausar) "
+        "com um resumo do que já foi feito/decidido até ali — assim ele nunca "
+        "fica desatualizado em relação ao progresso real. Alguns steps desse "
+        'arquivo podem vir com "source": "user" — foram adicionados manualmente '
+        "por mim fora deste terminal (pedidos extras depois de eu revisar o "
+        "resultado). Nunca remova esses steps nem apague o campo \"source\" "
+        "deles — só atualize o status conforme for resolvendo. Os demais steps "
+        "(sem esse campo) são seus, gerencie livremente. Esse nome de arquivo é "
+        "específico desta atividade — não reaproveite um arquivo "
+        ".claude-activity-status-*.json que encontrar sobrando de outra "
+        "atividade, mesmo que pareça relacionado. Se ainda não estiver no "
+        ".gitignore do projeto, adicione a linha .claude-activity-status-*.json "
+        "lá (cobre qualquer atividade, não só esta)."
+    )
 
 
 def _load() -> list[dict]:
@@ -74,12 +98,12 @@ def _project_folder(project_id: str) -> str:
     return project["folders"][0]["path"]
 
 
-def _read_progress(folder: str) -> list[dict]:
-    """Lê o {PROGRESS_FILE_NAME} que a própria atividade mantém (via
-    PROGRESS_INSTRUCTION). Tolera o arquivo não existir ainda ou estar no
-    meio de uma escrita do Claude — nesses casos volta lista vazia em vez
-    de erro."""
-    path = Path(folder) / PROGRESS_FILE_NAME
+def _read_progress(folder: str, activity_id: str) -> list[dict]:
+    """Lê o arquivo de progresso específico desta atividade (via
+    `_progress_instruction`). Tolera o arquivo não existir ainda ou estar
+    no meio de uma escrita do Claude — nesses casos volta lista vazia em
+    vez de erro."""
+    path = Path(folder) / _progress_file_name(activity_id)
     if not path.exists():
         return []
     try:
@@ -90,8 +114,8 @@ def _read_progress(folder: str) -> list[dict]:
     return steps if isinstance(steps, list) else []
 
 
-def _write_progress(folder: str, steps: list[dict]) -> None:
-    write_json_atomic(Path(folder) / PROGRESS_FILE_NAME, {"steps": steps})
+def _write_progress(folder: str, activity_id: str, steps: list[dict]) -> None:
+    write_json_atomic(Path(folder) / _progress_file_name(activity_id), {"steps": steps})
 
 
 def _checkout_safely(folder: str, branch: str) -> None:
@@ -158,7 +182,10 @@ def running_activities() -> dict:
     activities = _load()
     _check_pausing_activities(activities)
     ids = claude_terminal.list_open_activity_ids([a["id"] for a in activities])
-    return {"activityIds": ids}
+    # Só checa as que já sabemos que têm janela aberta — sem isso seria
+    # mais uma leitura de AppleScript por atividade fechada, à toa.
+    needs_attention_ids = [aid for aid in ids if claude_terminal.is_waiting_for_input(aid)]
+    return {"activityIds": ids, "needsAttentionIds": needs_attention_ids}
 
 
 def _check_pausing_activities(activities: list[dict]) -> None:
@@ -256,6 +283,17 @@ def start_activity(activity_id: str) -> dict:
     all_projects = _load_projects()
     related_folders: list[str] = []
     related_notes: list[str] = []
+    # Decidido na criação (mesmo default true de `startFromDevBranch`) —
+    # true: cada projeto relacionado parte limpo da própria dev branch,
+    # atualizada, numa branch nova com o mesmo nome da atividade. false:
+    # o Claude trabalha em cima do que já estiver checked out lá, sem
+    # mexer em nada. Só é decidido de verdade na primeira vez; retomadas
+    # sempre voltam pra branch já escolhida então (`relatedBranchNames`),
+    # mesmo que o projeto tenha trocado de branch nesse meio tempo por
+    # outro motivo — sem isso, "Concluir atividade" não teria como saber
+    # onde procurar o trabalho desse projeto.
+    related_start_from_dev = activity.get("relatedStartFromDevBranch", True)
+    related_branch_names: dict[str, str] = dict(activity.get("relatedBranchNames", {}))
     for related_id in activity.get("relatedProjectIds", []):
         related_project = _find_project(all_projects, related_id)
         if related_project is None or not related_project["folders"]:
@@ -263,17 +301,32 @@ def start_activity(activity_id: str) -> dict:
         related_path = related_project["folders"][0]["path"]
         related_folders.append(related_path)
         related_notes.append(f"- {related_project['name']}: {related_path}")
-        # Põe o repo relacionado na mesma branch da atividade — sem isso,
-        # os commits que o Claude fizer lá (ele tem acesso de edição via
-        # --add-dir) ficariam soltos na branch que já estivesse ali, e
-        # "Concluir atividade" não teria como distinguir esse trabalho pra
-        # abrir um MR. Melhor esforço: se a pasta tiver mudança não
-        # commitada numa branch diferente, deixamos como está — o Claude
-        # ou o usuário resolve, não vale travar o início da atividade.
-        try:
-            git_utils.checkout(related_path, branch)
-        except git_utils.GitError:
-            pass
+
+        if is_first_start:
+            try:
+                if related_start_from_dev:
+                    related_dev_branch = related_project.get("devBranch")
+                    # Só puxa a dev branch se a árvore estiver limpa —
+                    # melhor esforço, não vale travar o início da
+                    # atividade principal por causa de um projeto
+                    # relacionado sujo.
+                    if related_dev_branch and git_utils.is_clean(related_path):
+                        git_utils.checkout(related_path, related_dev_branch)
+                        git_utils.pull(related_path)
+                    git_utils.checkout(related_path, branch)
+                    related_branch_names[related_id] = branch
+                else:
+                    related_branch_names[related_id] = git_utils.current_branch(related_path)
+            except git_utils.GitError:
+                pass
+        else:
+            target = related_branch_names.get(related_id)
+            if target:
+                try:
+                    git_utils.checkout(related_path, target)
+                except git_utils.GitError:
+                    pass
+    activity["relatedBranchNames"] = related_branch_names
 
     # "resuming" só quer dizer "essa atividade já foi iniciada antes" — não
     # garante que exista memória de verdade pra retomar. Cada abertura do
@@ -286,6 +339,13 @@ def start_activity(activity_id: str) -> dict:
     # os campos abaixo refletem a situação real do STATUS.md).
     resuming = activity["started"] and (Path(folder) / "STATUS.md").exists()
     prompt = activity["prompt"]
+    # Só os ainda não confirmados — um critério marcado `met` foi decisão
+    # minha (fora deste terminal), não precisa voltar a ocupar espaço no
+    # prompt toda vez que a atividade é retomada.
+    pending_criteria = [c for c in activity.get("acceptanceCriteria", []) if not c.get("met")]
+    if pending_criteria:
+        criteria_list = "\n".join(f"- {c['text']}" for c in pending_criteria)
+        prompt = f"{ACCEPTANCE_CRITERIA_INSTRUCTION.format(criteria=criteria_list)}\n\n{prompt}"
     if related_notes:
         prompt = (
             "Esta atividade também envolve mudanças em outros projetos:\n"
@@ -302,7 +362,7 @@ def start_activity(activity_id: str) -> dict:
     # não concluído da última vez), avisamos explicitamente aqui em vez de
     # só confiar no checklist ficar lá silenciosamente esperando ser lido.
     if not is_first_start:
-        pending_steps = [s for s in _read_progress(folder) if s.get("status") != "done"]
+        pending_steps = [s for s in _read_progress(folder, activity_id) if s.get("status") != "done"]
         if pending_steps:
             pending_notes = "\n".join(
                 f"- {s.get('title', '(sem título)')} (status atual: {s.get('status', 'pending')})"
@@ -314,7 +374,7 @@ def start_activity(activity_id: str) -> dict:
                 f"última vez que você rodou):\n{pending_notes}\n\n{prompt}"
             )
 
-    prompt = f"{PROGRESS_INSTRUCTION}\n\n{prompt}"
+    prompt = f"{_progress_instruction(activity_id)}\n\n{prompt}"
 
     claude_terminal.open_claude_window(activity_id, folder, prompt, related_folders)
 
@@ -328,20 +388,20 @@ def start_activity(activity_id: str) -> dict:
 @router.get("/activities/{activity_id}/progress")
 def get_activity_progress(activity_id: str) -> dict:
     """Lê o arquivo de progresso que a própria atividade mantém (via
-    PROGRESS_INSTRUCTION). Não é um endpoint do Claude Code — é só o app
+    `_progress_instruction`). Não é um endpoint do Claude Code — é só o app
     lendo um arquivo simples que pedimos pro Claude escrever, já que o CLI
     não expõe API/hook nenhum pra acompanhar o plano/passos de fora."""
     activities = _load()
     activity = _find(activities, activity_id)
     folder = _project_folder(activity["projectId"])
-    return {"steps": _read_progress(folder)}
+    return {"steps": _read_progress(folder, activity_id)}
 
 
 @router.post("/activities/{activity_id}/steps")
 def add_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
     """Adiciona um passo manual ao checklist de progresso da atividade —
     marcado com `source: "user"` pra distinguir dos passos que o próprio
-    Claude gerencia (ver PROGRESS_INSTRUCTION: ele é instruído a nunca
+    Claude gerencia (ver `_progress_instruction`: ele é instruído a nunca
     remover steps com essa marca)."""
     activities = _load()
     activity = _find(activities, activity_id)
@@ -349,9 +409,9 @@ def add_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
     title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Título do passo não pode ser vazio.")
-    steps = _read_progress(folder)
+    steps = _read_progress(folder, activity_id)
     steps.append({"title": title, "status": "pending", "source": "user"})
-    _write_progress(folder, steps)
+    _write_progress(folder, activity_id, steps)
     return {"steps": steps}
 
 
@@ -363,11 +423,11 @@ def delete_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
     activities = _load()
     activity = _find(activities, activity_id)
     folder = _project_folder(activity["projectId"])
-    steps = _read_progress(folder)
+    steps = _read_progress(folder, activity_id)
     for i, step in enumerate(steps):
         if step.get("title") == payload.title and step.get("source") == "user":
             del steps[i]
-            _write_progress(folder, steps)
+            _write_progress(folder, activity_id, steps)
             return {"steps": steps}
     raise HTTPException(
         status_code=404,
@@ -419,9 +479,13 @@ def conclude_activity(activity_id: str) -> dict:
         )
     folder = project["folders"][0]["path"]
 
-    steps = _read_progress(folder)
+    steps = _read_progress(folder, activity_id)
     if not steps or any(step.get("status") != "done" for step in steps):
         raise HTTPException(status_code=400, detail="Ainda há passos pendentes no checklist da atividade.")
+
+    criteria = activity.get("acceptanceCriteria", [])
+    if criteria and any(not c.get("met") for c in criteria):
+        raise HTTPException(status_code=400, detail="Ainda há critérios de aceite não confirmados por você.")
 
     branch = activity.get("branchName")
     if not branch:
@@ -487,6 +551,7 @@ def _conclude_related_projects(activity: dict, branch: str) -> tuple[list[dict],
     related_mrs: list[dict] = []
     warnings: list[str] = []
     all_projects = _load_projects()
+    related_branch_names: dict[str, str] = activity.get("relatedBranchNames", {})
 
     for related_id in activity.get("relatedProjectIds", []):
         related_project = _find_project(all_projects, related_id)
@@ -496,14 +561,31 @@ def _conclude_related_projects(activity: dict, branch: str) -> tuple[list[dict],
         related_folder = related_project["folders"][0]["path"]
         related_dev_branch = related_project.get("devBranch")
         if not related_dev_branch:
-            continue  # sem branch de dev configurada, não dá pra saber o alvo do MR
+            warnings.append(
+                f"{name}: sem branch de desenvolvimento configurada — não dá pra saber o alvo do MR, "
+                "nada foi aberto aqui. Configure em Detalhar → Editar."
+            )
+            continue
+
+        # Branch em que esse projeto trabalhou nesta atividade, decidida em
+        # `start_activity` (guardada em `relatedBranchNames`). Atividades
+        # criadas antes desse campo existir caem no fallback: assume que
+        # foi a mesma branch da atividade principal (comportamento antigo).
+        expected_branch = related_branch_names.get(related_id, branch)
 
         try:
             related_current = git_utils.current_branch(related_folder)
         except git_utils.GitError:
-            continue  # pasta sem repo git válido — nada a fazer aqui
-        if related_current != branch or related_current == related_dev_branch:
+            warnings.append(f"{name}: não é um repositório git válido — nada foi aberto aqui.")
+            continue
+        if related_current == related_dev_branch:
             continue  # o Claude não chegou a trabalhar nessa pasta nesta atividade
+        if related_current != expected_branch:
+            warnings.append(
+                f"{name}: está na branch '{related_current}', mas o esperado pra essa atividade era "
+                f"'{expected_branch}' — nada foi aberto aqui. Confira manualmente se há trabalho pra abrir MR."
+            )
+            continue
 
         if not git_utils.is_clean(related_folder):
             warnings.append(f"{name}: há mudanças não commitadas — MR não foi aberto aqui.")
@@ -523,13 +605,13 @@ def _conclude_related_projects(activity: dict, branch: str) -> tuple[list[dict],
             continue  # branch existe mas não tem commit novo — nada a abrir
 
         try:
-            git_utils.push(related_folder, branch)
+            git_utils.push(related_folder, expected_branch)
             related_project_path = gitlab_client.project_path_from_remote(related_folder)
-            related_mr = gitlab_client.find_open_mr(related_project_path, branch)
+            related_mr = gitlab_client.find_open_mr(related_project_path, expected_branch)
             related_created = False
             if related_mr is None:
                 related_mr = gitlab_client.create_mr(
-                    related_project_path, branch, related_dev_branch, activity["title"], activity["prompt"]
+                    related_project_path, expected_branch, related_dev_branch, activity["title"], activity["prompt"]
                 )
                 related_created = True
         except (git_utils.GitError, gitlab_client.GitlabError) as exc:

@@ -64,6 +64,31 @@ def list_open_activity_ids(known_ids: list[str]) -> list[str]:
     return [activity_id for activity_id in known_ids if activity_id in window_ids and _window_exists(window_ids[activity_id])]
 
 
+def is_waiting_for_input(activity_id: str) -> bool:
+    """Melhor esforço: lê o conteúdo visível da janela do Terminal e tenta
+    adivinhar se o Claude está parado esperando algo de você — respondeu
+    uma pergunta, terminou o turno, ou está num menu de permissão — em vez
+    de ativamente gerando/rodando ferramenta. Baseado em texto que o
+    próprio Claude Code CLI imprime (confirmado lendo o conteúdo real de
+    uma janela ao vivo, 2026-07-20): enquanto está trabalhando, o rodapé
+    mostra um spinner com "(esc to interrupt)"; quando o turno termina (ou
+    fica parado num menu de permissão), esse texto some. Ausência de "esc
+    to interrupt" nos últimos caracteres visíveis == precisa de você.
+    Inerentemente frágil (texto de UI de terceiro, muda entre versões do
+    CLI) — se parar de bater, é aqui que ajustar. Retorna False se a
+    janela não existe ou não deu pra ler o conteúdo (nada a indicar)."""
+    window_ids = _load_window_ids()
+    window_id = window_ids.get(activity_id)
+    if window_id is None or not _window_exists(window_id):
+        return False
+    script = f'tell application "Terminal" to return contents of selected tab of window id {window_id}'
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode != 0:
+        return False
+    tail = result.stdout[-4000:]
+    return "esc to interrupt" not in tail
+
+
 def open_claude_window(activity_id: str, folder: str, prompt: str, related_folders: list[str] | None = None) -> None:
     """Abre uma janela do Terminal.app na pasta do projeto rodando `claude`
     com o prompt carregado. O prompt vai pra um arquivo temporário (não

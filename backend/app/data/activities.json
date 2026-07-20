@@ -12,6 +12,37 @@
     "started": true,
     "concluded": true,
     "mrUrl": "https://gitlab.com/resona3/resona-frontend/-/merge_requests/19",
-    "pausingSinceCommit": null
+    "pausingSinceCommit": null,
+    "relatedMrUrls": {}
+  },
+  {
+    "title": "Adição de imagem na criação de questões",
+    "prompt": "Na criação de uma questão atualmente n é possível anexar uma imagem (só deve ser add no máximo uma) nem no front nem no @ressona-backend isso é realizável. Preciso que ajuste isso. No detalhamento da questão deve-se aparecer a imagem também, assim como na aplicação final da prova cujo as questões que tem imagem devem mostrar a mesma. Ou seja, add isso na criação, na visualização da questão e na prova mooc",
+    "acceptanceCriteria": [
+      {
+        "text": "campo de add imagem na criação da questão",
+        "met": false
+      },
+      {
+        "text": "ver imagem no detalhamento da questão",
+        "met": false
+      },
+      {
+        "text": "ver imagem durante o mooc",
+        "met": false
+      }
+    ],
+    "relatedProjectIds": [
+      "proj-2450966d"
+    ],
+    "startFromDevBranch": false,
+    "branchName": "feat/user-selection-process",
+    "relatedStartFromDevBranch": false,
+    "id": "act-1941ac43",
+    "projectId": "proj-a27fca3f",
+    "started": true,
+    "relatedBranchNames": {
+      "proj-2450966d": "feature/analyst-onboarding"
+    }
   }
 ]

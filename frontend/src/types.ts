@@ -70,30 +70,41 @@ export interface RunningProjects {
   ports: Record<string, number[]>;
 }
 
+export interface AcceptanceCriterion {
+  text: string;
+  met: boolean;
+}
+
 export interface Activity {
   id: string;
   projectId: string;
   title: string;
   prompt: string;
+  acceptanceCriteria: AcceptanceCriterion[];
   started: boolean;
   concluded: boolean;
   mrUrl: string | null;
   relatedMrUrls: Record<string, string>;
+  relatedBranchNames: Record<string, string>;
   relatedProjectIds: string[];
   startFromDevBranch: boolean;
   branchName: string;
+  relatedStartFromDevBranch: boolean;
 }
 
 export interface ActivityInput {
   title: string;
   prompt: string;
+  acceptanceCriteria: AcceptanceCriterion[];
   relatedProjectIds: string[];
   startFromDevBranch: boolean;
   branchName: string;
+  relatedStartFromDevBranch: boolean;
 }
 
 export interface RunningActivities {
   activityIds: string[];
+  needsAttentionIds: string[];
 }
 
 export type ActivityStepStatus = 'pending' | 'in_progress' | 'done';

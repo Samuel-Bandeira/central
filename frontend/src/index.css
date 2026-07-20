@@ -425,6 +425,15 @@ button {
   color: var(--danger);
 }
 
+.field-success {
+  color: var(--success);
+}
+
+.field-success a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .field-hint {
   font-size: 12px;
   color: var(--text-muted);
@@ -627,6 +636,18 @@ button {
   background: var(--card-bg);
 }
 
+/* Form de criar/editar atividade reaproveita .activity-item como moldura,
+   mas precisa de ritmo vertical entre os campos — sem isso, os .field
+   ficam colados uns nos outros (zero gap real, só o respiro óptico do
+   line-height). Escopado só nessa variante pra não mexer na exibição
+   normal da atividade (título/badges/prompt), que já tem seus próprios
+   margin-top pontuais. */
+.activity-item.activity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .activity-header {
   display: flex;
   align-items: center;
@@ -648,6 +669,11 @@ button {
 .activity-status-paused {
   color: var(--text-muted);
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
+.activity-status-attention {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
 }
 
 .activity-status-concluded {
@@ -815,6 +841,61 @@ button {
   to {
     transform: rotate(360deg);
   }
+}
+
+.acceptance-criteria-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.acceptance-criterion-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+}
+
+.acceptance-criterion-toggle svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.acceptance-criterion-met .acceptance-criterion-toggle {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.acceptance-criterion-met .acceptance-criterion-toggle svg {
+  color: var(--success);
+}
+
+.acceptance-criteria-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acceptance-criteria-editor-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.acceptance-criteria-editor-row input {
+  flex: 1;
+  min-width: 0;
 }
 
 .mention-textarea {

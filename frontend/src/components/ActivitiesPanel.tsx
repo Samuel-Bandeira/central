@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FiCheckCircle, FiCircle, FiLoader, FiX } from 'react-icons/fi';
+import { FiCheckCircle, FiCheckSquare, FiCircle, FiLoader, FiSquare, FiX } from 'react-icons/fi';
 import { api, ApiError } from '../api/client';
-import type { Activity, ActivityStep, Project } from '../types';
+import type { AcceptanceCriterion, Activity, ActivityConcludeResult, ActivityStep, Project } from '../types';
 
 const RUNNING_POLL_INTERVAL_MS = 5000;
 const PROGRESS_POLL_INTERVAL_MS = 4000;
@@ -16,11 +16,20 @@ interface Props {
 interface FormState {
   title: string;
   prompt: string;
+  acceptanceCriteria: AcceptanceCriterion[];
   startFromDevBranch: boolean;
   branchName: string;
+  relatedStartFromDevBranch: boolean;
 }
 
-const EMPTY_FORM: FormState = { title: '', prompt: '', startFromDevBranch: true, branchName: '' };
+const EMPTY_FORM: FormState = {
+  title: '',
+  prompt: '',
+  acceptanceCriteria: [],
+  startFromDevBranch: true,
+  branchName: '',
+  relatedStartFromDevBranch: true,
+};
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -105,6 +114,73 @@ function MentionTextarea({ value, onChange, candidates, rows, placeholder }: Men
         </ul>
       )}
     </div>
+  );
+}
+
+interface AcceptanceCriteriaEditorProps {
+  items: AcceptanceCriterion[];
+  onChange: (items: AcceptanceCriterion[]) => void;
+}
+
+// Edita o texto dos critérios (título/prompt da atividade). O status "met"
+// não se mexe aqui — ele só muda pelo checklist ao vivo no card (ver
+// AcceptanceCriteriaList), porque é uma confirmação minha sobre o trabalho
+// já feito, não parte da redação da tarefa.
+function AcceptanceCriteriaEditor({ items, onChange }: AcceptanceCriteriaEditorProps) {
+  return (
+    <div className="acceptance-criteria-editor">
+      {items.map((c, i) => (
+        <div key={i} className="acceptance-criteria-editor-row">
+          <input
+            value={c.text}
+            placeholder="Ex: GET /projetos/:id retorna 404 se não existir"
+            onChange={(e) => onChange(items.map((item, idx) => (idx === i ? { ...item, text: e.target.value } : item)))}
+          />
+          <button
+            type="button"
+            className="btn btn-icon"
+            aria-label="Remover critério"
+            onClick={() => onChange(items.filter((_, idx) => idx !== i))}
+          >
+            <FiX size={14} />
+          </button>
+        </div>
+      ))}
+      <button type="button" className="btn" onClick={() => onChange([...items, { text: '', met: false }])}>
+        + Critério de aceite
+      </button>
+    </div>
+  );
+}
+
+interface AcceptanceCriteriaListProps {
+  criteria: AcceptanceCriterion[];
+  onToggle: (index: number) => void;
+}
+
+// Checklist ao vivo no card — diferente do ActivityProgressList (plano do
+// Claude), esse é o "pronto" fixado por mim antes de começar. Só eu marco
+// (o Claude é instruído a nunca escrever nesse campo), por isso aqui é
+// clicável em vez de só refletir um arquivo que o Claude mantém.
+function AcceptanceCriteriaList({ criteria, onToggle }: AcceptanceCriteriaListProps) {
+  if (criteria.length === 0) return null;
+  return (
+    <ul className="acceptance-criteria-list">
+      {criteria.map((c, i) => (
+        <li key={i} className={`acceptance-criterion ${c.met ? 'acceptance-criterion-met' : ''}`}>
+          <button
+            type="button"
+            className="acceptance-criterion-toggle"
+            aria-pressed={c.met}
+            title={c.met ? 'Marcar como não atendido' : 'Marcar como atendido'}
+            onClick={() => onToggle(i)}
+          >
+            {c.met ? <FiCheckSquare /> : <FiSquare />}
+            <span>{c.text}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -193,15 +269,47 @@ function StartOriginChoice({ value, onChange, devBranch }: StartOriginChoiceProp
   );
 }
 
+interface RelatedOriginChoiceProps {
+  value: boolean;
+  onChange: (value: boolean) => void;
+  relatedNames: string[];
+}
+
+// Mesma decisão que StartOriginChoice, mas pros projetos citados com @ no
+// prompt — cada um tem sua própria dev branch, então não dá pra reusar o
+// mesmo componente (não existe uma única "devBranch" pra mostrar aqui).
+function RelatedOriginChoice({ value, onChange, relatedNames }: RelatedOriginChoiceProps) {
+  if (relatedNames.length === 0) return null;
+  return (
+    <label className="field">
+      Projetos relacionados ({relatedNames.join(', ')}) vão iniciar a partir de
+      <div className="activity-origin-choice">
+        <label>
+          <input type="radio" checked={value} onChange={() => onChange(true)} />
+          da própria branch de desenvolvimento de cada um (dá pull, cria branch nova de mesmo nome)
+        </label>
+        <label>
+          <input type="radio" checked={!value} onChange={() => onChange(false)} />
+          da branch em que cada um já estiver
+        </label>
+      </div>
+    </label>
+  );
+}
+
 export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
+  const [needsAttentionIds, setNeedsAttentionIds] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<FormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<FormState>(EMPTY_FORM);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [concludeResult, setConcludeResult] = useState<{ activityTitle: string; result: ActivityConcludeResult } | null>(
+    null,
+  );
   const [stepsByActivity, setStepsByActivity] = useState<Record<string, ActivityStep[]>>({});
   const [addingStepFor, setAddingStepFor] = useState<string | null>(null);
   const [newStepTitle, setNewStepTitle] = useState('');
@@ -220,8 +328,9 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   }, [projectId]);
 
   const refreshRunning = useCallback(async () => {
-    const { activityIds } = await api.getRunningActivities();
+    const { activityIds, needsAttentionIds } = await api.getRunningActivities();
     setRunningIds(new Set(activityIds));
+    setNeedsAttentionIds(new Set(needsAttentionIds));
   }, []);
 
   useEffect(() => {
@@ -260,15 +369,21 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     };
   }, [startedActivityIds]);
 
+  function cleanCriteria(items: AcceptanceCriterion[]): AcceptanceCriterion[] {
+    return items.map((c) => ({ ...c, text: c.text.trim() })).filter((c) => c.text);
+  }
+
   async function handleCreate() {
     if (!createForm.title.trim() || !createForm.prompt.trim()) return;
     if (createForm.startFromDevBranch && !createForm.branchName.trim()) return;
     await api.createActivity(projectId, {
       title: createForm.title.trim(),
       prompt: createForm.prompt.trim(),
+      acceptanceCriteria: cleanCriteria(createForm.acceptanceCriteria),
       relatedProjectIds: extractMentionedProjectIds(createForm.prompt, otherProjects),
       startFromDevBranch: createForm.startFromDevBranch,
       branchName: createForm.startFromDevBranch ? createForm.branchName.trim() : '',
+      relatedStartFromDevBranch: createForm.relatedStartFromDevBranch,
     });
     setCreateForm(EMPTY_FORM);
     setCreating(false);
@@ -280,8 +395,10 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     setEditForm({
       title: activity.title,
       prompt: activity.prompt,
+      acceptanceCriteria: activity.acceptanceCriteria,
       startFromDevBranch: activity.startFromDevBranch,
       branchName: activity.branchName,
+      relatedStartFromDevBranch: activity.relatedStartFromDevBranch,
     });
   }
 
@@ -291,12 +408,25 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     await api.updateActivity(activityId, {
       title: editForm.title.trim(),
       prompt: editForm.prompt.trim(),
+      acceptanceCriteria: cleanCriteria(editForm.acceptanceCriteria),
       relatedProjectIds: extractMentionedProjectIds(editForm.prompt, otherProjects),
       startFromDevBranch: editForm.startFromDevBranch,
       branchName: editForm.startFromDevBranch ? editForm.branchName.trim() : '',
+      relatedStartFromDevBranch: editForm.relatedStartFromDevBranch,
     });
     setEditingId(null);
     await refresh();
+  }
+
+  async function handleToggleCriterion(activity: Activity, index: number) {
+    const acceptanceCriteria = activity.acceptanceCriteria.map((c, i) => (i === index ? { ...c, met: !c.met } : c));
+    setError(null);
+    try {
+      await api.updateActivity(activity.id, { acceptanceCriteria });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    }
   }
 
   async function handleDelete(activityId: string) {
@@ -308,6 +438,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   async function handleStart(activity: Activity) {
     setBusyId(activity.id);
     setError(null);
+    setConcludeResult(null);
     try {
       await api.startActivity(activity.id);
       await Promise.all([refresh(), refreshRunning()]);
@@ -321,6 +452,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   async function handlePause(activity: Activity) {
     setBusyId(activity.id);
     setError(null);
+    setConcludeResult(null);
     try {
       const { sent } = await api.pauseActivity(activity.id);
       if (!sent) {
@@ -337,13 +469,15 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
   async function handleConclude(activity: Activity) {
     setBusyId(activity.id);
     setError(null);
+    setConcludeResult(null);
     try {
-      const { terminalClosed, warnings } = await api.concludeActivity(activity.id);
+      const result = await api.concludeActivity(activity.id);
+      setConcludeResult({ activityTitle: activity.title, result });
       const messages: string[] = [];
-      if (!terminalClosed) {
+      if (!result.terminalClosed) {
         messages.push('MR aberto, mas não consegui fechar o terminal sozinho — feche manualmente.');
       }
-      messages.push(...warnings);
+      messages.push(...result.warnings);
       if (messages.length > 0) {
         setError(messages.join(' '));
       }
@@ -389,6 +523,22 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
         <p className="pending-note">Cadastre uma pasta pro projeto antes de criar atividades — o Claude roda dentro dela.</p>
       )}
       {error && <p className="pending-note field-error">{error}</p>}
+      {concludeResult && (
+        <p className="pending-note field-success">
+          "{concludeResult.activityTitle}" concluída — {concludeResult.result.created ? 'MR aberto' : 'MR já existente reaproveitado'}:{' '}
+          <a href={concludeResult.result.mrUrl} target="_blank" rel="noreferrer">
+            {concludeResult.result.mrUrl}
+          </a>
+          {concludeResult.result.relatedMrs.map((m) => (
+            <span key={m.projectId}>
+              {' · '}
+              <a href={m.mrUrl} target="_blank" rel="noreferrer">
+                {m.projectName}
+              </a>
+            </span>
+          ))}
+        </p>
+      )}
       {!currentProjectDevBranch && (
         <p className="pending-note field-error">
           Configure a branch de desenvolvimento do projeto (aba Detalhar → Editar) antes de iniciar atividades.
@@ -428,7 +578,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           const busy = busyId === activity.id;
           if (editingId === activity.id) {
             return (
-              <li key={activity.id} className="activity-item">
+              <li key={activity.id} className="activity-item activity-form">
                 <label className="field">
                   Título
                   <input value={editForm.title} onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))} />
@@ -442,6 +592,17 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     candidates={otherProjects}
                   />
                   <span className="field-hint">Digite @ pra citar outro projeto que também precisa mudar.</span>
+                </label>
+                <label className="field">
+                  Critérios de aceite (opcional)
+                  <AcceptanceCriteriaEditor
+                    items={editForm.acceptanceCriteria}
+                    onChange={(acceptanceCriteria) => setEditForm((f) => ({ ...f, acceptanceCriteria }))}
+                  />
+                  <span className="field-hint">
+                    O "pronto" fixado da tarefa — diferente do checklist de passos, só você marca cada um como
+                    atendido, e "Concluir atividade" só libera quando todos estiverem.
+                  </span>
                 </label>
                 {!activity.started && (
                   <>
@@ -460,6 +621,13 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                         />
                       </label>
                     )}
+                    <RelatedOriginChoice
+                      value={editForm.relatedStartFromDevBranch}
+                      onChange={(relatedStartFromDevBranch) => setEditForm((f) => ({ ...f, relatedStartFromDevBranch }))}
+                      relatedNames={extractMentionedProjectIds(editForm.prompt, otherProjects)
+                        .map((id) => projectsById.get(id)?.name)
+                        .filter(Boolean) as string[]}
+                    />
                   </>
                 )}
                 <div className="modal-actions">
@@ -481,6 +649,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           // dizia "rodando", o que é contraditório e confuso.
           const startLabel = !activity.started ? 'Iniciar' : running ? 'Em andamento' : 'Continuar';
           const statusLabel = running ? 'rodando agora' : activity.started ? 'pausada — terminal fechado' : null;
+          const needsAttention = running && needsAttentionIds.has(activity.id);
           const devBranch = currentProjectDevBranch;
           // Origem só é relevante mostrar antes da primeira vez que a
           // atividade roda (depois disso já tem sua própria branch com
@@ -496,7 +665,8 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           const startDisabled = !hasFolders || busy || running || !devBranch;
           const steps = stepsByActivity[activity.id] ?? [];
           const allStepsDone = steps.length > 0 && steps.every((s) => s.status === 'done');
-          const canConclude = activity.started && allStepsDone;
+          const allCriteriaMet = activity.acceptanceCriteria.every((c) => c.met);
+          const canConclude = activity.started && allStepsDone && allCriteriaMet;
 
           return (
             <li key={activity.id} className="activity-item">
@@ -509,6 +679,14 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                 {statusLabel && (
                   <span className={`activity-status ${running ? 'activity-status-running' : 'activity-status-paused'}`}>
                     {statusLabel}
+                  </span>
+                )}
+                {needsAttention && (
+                  <span
+                    className="activity-status activity-status-attention"
+                    title="O terminal parece parado esperando você — pode ter feito uma pergunta ou terminado o turno. Melhor esforço: baseado no texto da tela, pode errar."
+                  >
+                    precisa de você
                   </span>
                 )}
                 {activity.concluded && activity.mrUrl && (
@@ -530,6 +708,10 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                   ))}
               </div>
               <p className="activity-prompt">{activity.prompt}</p>
+              <AcceptanceCriteriaList
+                criteria={activity.acceptanceCriteria}
+                onToggle={(index) => handleToggleCriterion(activity, index)}
+              />
               {activity.started && (
                 <ActivityProgressList steps={steps} onDeleteStep={(title) => handleDeleteStep(activity, title)} />
               )}
@@ -597,7 +779,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     type="button"
                     className="btn btn-success"
                     disabled={busy}
-                    title="Abre (ou reaproveita) um MR no GitLab e fecha o terminal — todos os passos do checklist já estão concluídos"
+                    title="Abre (ou reaproveita) um MR no GitLab e fecha o terminal — checklist de passos concluído e critérios de aceite confirmados"
                     onClick={() => handleConclude(activity)}
                   >
                     {busy ? '…' : 'Concluir atividade'}
@@ -635,55 +817,77 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
           </p>
         )}
 
-      {creating ? (
-        <div className="activity-item">
-          <label className="field">
-            Título
-            <input
-              value={createForm.title}
-              onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Ex: corrigir bug do login"
-            />
-          </label>
-          <label className="field">
-            Prompt
-            <MentionTextarea
-              rows={3}
-              value={createForm.prompt}
-              onChange={(prompt) => setCreateForm((f) => ({ ...f, prompt }))}
-              candidates={otherProjects}
-              placeholder="O que o Claude deve fazer nessa atividade. Digite @ pra citar outro projeto."
-            />
-          </label>
-          <StartOriginChoice
-            value={createForm.startFromDevBranch}
-            onChange={(startFromDevBranch) => setCreateForm((f) => ({ ...f, startFromDevBranch }))}
-            devBranch={currentProjectDevBranch}
-          />
-          {createForm.startFromDevBranch && (
+      <button type="button" className="btn" onClick={() => setCreating(true)}>
+        + Nova atividade
+      </button>
+
+      {creating && (
+        <div className="modal-overlay" onClick={() => { setCreating(false); setCreateForm(EMPTY_FORM); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Nova atividade</h2>
             <label className="field">
-              Nome da branch
+              Título
               <input
-                value={createForm.branchName}
-                onChange={(e) => setCreateForm((f) => ({ ...f, branchName: e.target.value }))}
-                placeholder="ex: task/corrigir-login"
+                value={createForm.title}
+                onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Ex: corrigir bug do login"
+                autoFocus
               />
-              <span className="field-hint">Branch que vai ser criada pra essa atividade — escolha um nome, não é gerado sozinho.</span>
             </label>
-          )}
-          <div className="modal-actions">
-            <button type="button" className="btn" onClick={() => { setCreating(false); setCreateForm(EMPTY_FORM); }}>
-              Cancelar
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handleCreate}>
-              Criar
-            </button>
+            <label className="field">
+              Prompt
+              <MentionTextarea
+                rows={3}
+                value={createForm.prompt}
+                onChange={(prompt) => setCreateForm((f) => ({ ...f, prompt }))}
+                candidates={otherProjects}
+                placeholder="O que o Claude deve fazer nessa atividade. Digite @ pra citar outro projeto."
+              />
+            </label>
+            <label className="field">
+              Critérios de aceite (opcional)
+              <AcceptanceCriteriaEditor
+                items={createForm.acceptanceCriteria}
+                onChange={(acceptanceCriteria) => setCreateForm((f) => ({ ...f, acceptanceCriteria }))}
+              />
+              <span className="field-hint">
+                O "pronto" fixado da tarefa — diferente do checklist de passos, só você marca cada um como atendido, e
+                "Concluir atividade" só libera quando todos estiverem.
+              </span>
+            </label>
+            <StartOriginChoice
+              value={createForm.startFromDevBranch}
+              onChange={(startFromDevBranch) => setCreateForm((f) => ({ ...f, startFromDevBranch }))}
+              devBranch={currentProjectDevBranch}
+            />
+            {createForm.startFromDevBranch && (
+              <label className="field">
+                Nome da branch
+                <input
+                  value={createForm.branchName}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, branchName: e.target.value }))}
+                  placeholder="ex: task/corrigir-login"
+                />
+                <span className="field-hint">Branch que vai ser criada pra essa atividade — escolha um nome, não é gerado sozinho.</span>
+              </label>
+            )}
+            <RelatedOriginChoice
+              value={createForm.relatedStartFromDevBranch}
+              onChange={(relatedStartFromDevBranch) => setCreateForm((f) => ({ ...f, relatedStartFromDevBranch }))}
+              relatedNames={extractMentionedProjectIds(createForm.prompt, otherProjects)
+                .map((id) => projectsById.get(id)?.name)
+                .filter(Boolean) as string[]}
+            />
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={() => { setCreating(false); setCreateForm(EMPTY_FORM); }}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleCreate}>
+                Criar
+              </button>
+            </div>
           </div>
         </div>
-      ) : (
-        <button type="button" className="btn" onClick={() => setCreating(true)}>
-          + Nova atividade
-        </button>
       )}
     </section>
   );
