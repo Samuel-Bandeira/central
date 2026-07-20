@@ -7,6 +7,7 @@ interface Props {
   section: Section;
   projects: Project[];
   getStatus: (projectId: string) => ProjectRunStatus;
+  getPorts: (projectId: string) => number[];
   onOpenDetail: (project: Project) => void;
   onOpenActivities: (project: Project) => void;
   onOpenTrello: (project: Project) => void;
@@ -66,6 +67,7 @@ export function SectionBox({
   section,
   projects,
   getStatus,
+  getPorts,
   onOpenDetail,
   onOpenActivities,
   onOpenTrello,
@@ -284,6 +286,7 @@ export function SectionBox({
             key={p.id}
             project={p}
             status={getStatus(p.id)}
+            ports={getPorts(p.id)}
             onOpenDetail={onOpenDetail}
             onOpenActivities={onOpenActivities}
             onOpenTrello={onOpenTrello}

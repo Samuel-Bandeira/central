@@ -300,6 +300,24 @@ button {
   white-space: nowrap;
 }
 
+.project-card-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.project-port-pill {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  white-space: nowrap;
+}
+
 .running-dot {
   width: 9px;
   height: 9px;
@@ -437,6 +455,17 @@ button {
   margin-top: 4px;
 }
 
+.port-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.port-picker-option {
+  text-align: left;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+}
+
 /* Aba de Detalhe */
 
 .detail-tab {
@@ -458,11 +487,21 @@ button {
   gap: 10px;
 }
 
+.git-status-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.detail-header-title .git-status-row {
+  margin-top: 0;
+}
+
 .git-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-top: 6px;
   font-size: 12px;
   font-weight: 600;
   padding: 3px 8px;
@@ -472,8 +511,48 @@ button {
   white-space: nowrap;
 }
 
-.detail-header-title .git-status-badge {
-  margin-top: 0;
+.git-changes-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
+.git-changes-indicator svg {
+  width: 12px;
+  height: 12px;
+}
+
+.git-changes-indicator.has-changes {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+
+.git-changes-indicator.is-loading {
+  animation: running-dot-pulse 1s ease-in-out infinite;
+}
+
+.git-changes-badge {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #2f7bf6;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  border: 2px solid var(--card-bg);
 }
 
 .git-status-loading {

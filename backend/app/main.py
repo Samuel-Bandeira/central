@@ -5,7 +5,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import launchd
+from . import launchd, port_utils
 from .routers import activities, filesystem, projects, sections, vscode
 
 app = FastAPI(title="Launcher de Projetos")
@@ -31,4 +31,14 @@ def health() -> dict:
 
 @app.get("/running-projects")
 def running_projects() -> dict:
-    return {"projectIds": sorted(launchd.list_running_project_ids())}
+    agents = launchd.list_agents()
+    all_projects = {p["id"]: p for p in projects.load_projects()}
+    running_ids = sorted(project_id for project_id, pid in agents.items() if pid is not None)
+    ports: dict[str, list[int]] = {}
+    for project_id, pid in agents.items():
+        if pid is None:
+            continue
+        folders = all_projects.get(project_id, {}).get("folders") or []
+        working_directory = folders[0]["path"] if folders else None
+        ports[project_id] = port_utils.project_ports(pid, working_directory)
+    return {"projectIds": running_ids, "ports": ports}

@@ -16,6 +16,13 @@ def is_clean(folder: str) -> bool:
     return _run(folder, "status", "--porcelain") == ""
 
 
+def uncommitted_count(folder: str) -> int:
+    """Quantidade de arquivos com mudanças não commitadas (modificados,
+    adicionados, removidos ou não rastreados)."""
+    output = _run(folder, "status", "--porcelain")
+    return len([line for line in output.splitlines() if line.strip()])
+
+
 def current_branch(folder: str) -> str:
     return _run(folder, "rev-parse", "--abbrev-ref", "HEAD")
 

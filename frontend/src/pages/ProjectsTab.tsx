@@ -36,6 +36,7 @@ export function ProjectsTab({
   const [showNewProject, setShowNewProject] = useState(false);
   const [runningProjectIds, setRunningProjectIds] = useState<Set<string>>(new Set());
   const [stoppingProjectIds, setStoppingProjectIds] = useState<Set<string>>(new Set());
+  const [portsByProject, setPortsByProject] = useState<Record<string, number[]>>({});
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const stoppingTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -48,9 +49,10 @@ export function ProjectsTab({
   }
 
   const refreshRunning = useCallback(async () => {
-    const { projectIds } = await api.getRunningProjects();
+    const { projectIds, ports } = await api.getRunningProjects();
     const runningSet = new Set(projectIds);
     setRunningProjectIds(runningSet);
+    setPortsByProject(ports);
     setStoppingProjectIds((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set<string>();
@@ -104,6 +106,10 @@ export function ProjectsTab({
     if (stoppingProjectIds.has(projectId)) return 'stopping';
     if (runningProjectIds.has(projectId)) return 'running';
     return 'stopped';
+  }
+
+  function getPorts(projectId: string): number[] {
+    return portsByProject[projectId] ?? [];
   }
 
   const assignedIds = new Set(sections.flatMap((s) => s.projectIds));
@@ -197,6 +203,7 @@ export function ProjectsTab({
             section={section}
             projects={projects}
             getStatus={getStatus}
+            getPorts={getPorts}
             onOpenDetail={onOpenDetail}
             onOpenActivities={onOpenActivities}
             onOpenTrello={onOpenTrello}
@@ -232,6 +239,7 @@ export function ProjectsTab({
               key={p.id}
               project={p}
               status={getStatus(p.id)}
+              ports={getPorts(p.id)}
               onOpenDetail={onOpenDetail}
               onOpenActivities={onOpenActivities}
               onOpenTrello={onOpenTrello}

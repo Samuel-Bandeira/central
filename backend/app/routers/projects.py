@@ -19,6 +19,10 @@ def _load() -> list[dict]:
     return read_json(DATA_PATH, [])
 
 
+def load_projects() -> list[dict]:
+    return _load()
+
+
 def _save(projects: list[dict]) -> None:
     write_json_atomic(DATA_PATH, projects)
 
@@ -86,14 +90,15 @@ def get_git_status(project_id: str) -> dict:
     nulos nesses casos, em vez de recusar."""
     projects = _load()
     project = _find(projects, project_id)
+    empty = {"currentBranch": None, "devBranch": project.get("devBranch"), "upToDate": None, "uncommittedCount": None}
     if not project["folders"]:
-        return {"currentBranch": None, "devBranch": project.get("devBranch"), "upToDate": None}
+        return empty
     folder = project["folders"][0]["path"]
 
     try:
         current = git_utils.current_branch(folder)
     except git_utils.GitError:
-        return {"currentBranch": None, "devBranch": project.get("devBranch"), "upToDate": None}
+        return empty
 
     dev_branch = project.get("devBranch")
     up_to_date = None
@@ -108,7 +113,17 @@ def get_git_status(project_id: str) -> dict:
             except git_utils.GitError:
                 continue
 
-    return {"currentBranch": current, "devBranch": dev_branch, "upToDate": up_to_date}
+    try:
+        uncommitted_count = git_utils.uncommitted_count(folder)
+    except git_utils.GitError:
+        uncommitted_count = None
+
+    return {
+        "currentBranch": current,
+        "devBranch": dev_branch,
+        "upToDate": up_to_date,
+        "uncommittedCount": uncommitted_count,
+    }
 
 
 @router.get("/{project_id}/trello-summary")

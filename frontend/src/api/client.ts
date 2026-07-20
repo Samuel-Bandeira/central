@@ -55,9 +55,12 @@ export const api = {
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
   getGitStatus: (id: string) =>
-    request<{ currentBranch: string | null; devBranch: string | null; upToDate: boolean | null }>(
-      `/projects/${id}/git-status`,
-    ),
+    request<{
+      currentBranch: string | null;
+      devBranch: string | null;
+      upToDate: boolean | null;
+      uncommittedCount: number | null;
+    }>(`/projects/${id}/git-status`),
   getTrelloSummary: (id: string) => request<TrelloSummary>(`/projects/${id}/trello-summary`),
   getTrelloCards: (id: string) => request<TrelloCards>(`/projects/${id}/cards`),
 

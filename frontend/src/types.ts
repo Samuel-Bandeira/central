@@ -67,6 +67,7 @@ export interface SectionStopResult {
 
 export interface RunningProjects {
   projectIds: string[];
+  ports: Record<string, number[]>;
 }
 
 export interface Activity {

@@ -106,7 +106,3 @@ def list_agents() -> dict[str, str | None]:
         if label.startswith(LABEL_PREFIX):
             agents[label[len(LABEL_PREFIX):]] = pid if pid.isdigit() else None
     return agents
-
-
-def list_running_project_ids() -> set[str]:
-    return {project_id for project_id, pid in list_agents().items() if pid is not None}
