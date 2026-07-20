@@ -263,6 +263,17 @@ def start_activity(activity_id: str) -> dict:
         related_path = related_project["folders"][0]["path"]
         related_folders.append(related_path)
         related_notes.append(f"- {related_project['name']}: {related_path}")
+        # Põe o repo relacionado na mesma branch da atividade — sem isso,
+        # os commits que o Claude fizer lá (ele tem acesso de edição via
+        # --add-dir) ficariam soltos na branch que já estivesse ali, e
+        # "Concluir atividade" não teria como distinguir esse trabalho pra
+        # abrir um MR. Melhor esforço: se a pasta tiver mudança não
+        # commitada numa branch diferente, deixamos como está — o Claude
+        # ou o usuário resolve, não vale travar o início da atividade.
+        try:
+            git_utils.checkout(related_path, branch)
+        except git_utils.GitError:
+            pass
 
     # "resuming" só quer dizer "essa atividade já foi iniciada antes" — não
     # garante que exista memória de verdade pra retomar. Cada abertura do
@@ -385,10 +396,14 @@ def pause_activity(activity_id: str) -> dict:
 @router.post("/activities/{activity_id}/conclude")
 def conclude_activity(activity_id: str) -> dict:
     """Abre (ou reaproveita) um MR no GitLab da branch da atividade pra
-    branch de desenvolvimento do projeto, fecha o terminal do Claude e
-    marca a atividade como concluída. Não trava a atividade — dá pra
-    continuar trabalhando na mesma branch depois e concluir de novo
-    (idempotente: acha o MR já aberto em vez de duplicar)."""
+    branch de desenvolvimento do projeto, e faz o mesmo em cada projeto
+    relacionado (`relatedProjectIds`) que tiver recebido commits nessa
+    mesma branch — assim uma atividade que mexeu em back e front, por
+    exemplo, sai com um MR em cada repo alterado, não só no principal.
+    Também fecha o terminal do Claude e marca a atividade como concluída.
+    Não trava a atividade — dá pra continuar trabalhando na mesma branch
+    depois e concluir de novo (idempotente: acha o MR já aberto em vez de
+    duplicar)."""
     activities = _load()
     activity = _find(activities, activity_id)
     project = _find_project(_load_projects(), activity["projectId"])
@@ -444,10 +459,90 @@ def conclude_activity(activity_id: str) -> dict:
     except gitlab_client.GitlabError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    related_mrs, warnings = _conclude_related_projects(activity, branch)
+
     terminal_closed = claude_terminal.close_window(activity_id)
 
     activity["concluded"] = True
     activity["mrUrl"] = mr["web_url"]
+    activity["relatedMrUrls"] = {m["projectId"]: m["mrUrl"] for m in related_mrs}
     _save(activities)
 
-    return {"mrUrl": mr["web_url"], "created": created, "terminalClosed": terminal_closed}
+    return {
+        "mrUrl": mr["web_url"],
+        "created": created,
+        "terminalClosed": terminal_closed,
+        "relatedMrs": related_mrs,
+        "warnings": warnings,
+    }
+
+
+def _conclude_related_projects(activity: dict, branch: str) -> tuple[list[dict], list[str]]:
+    """Pra cada projeto relacionado (`relatedProjectIds`) que ficou numa
+    branch própria (ver `start_activity`) com commits novos em relação à
+    branch de dev dele, empurra e abre (ou reaproveita) um MR — igual ao
+    fluxo do projeto principal, só que melhor esforço: problema num repo
+    relacionado vira aviso, não impede concluir a atividade no projeto
+    principal."""
+    related_mrs: list[dict] = []
+    warnings: list[str] = []
+    all_projects = _load_projects()
+
+    for related_id in activity.get("relatedProjectIds", []):
+        related_project = _find_project(all_projects, related_id)
+        if related_project is None or not related_project["folders"]:
+            continue
+        name = related_project["name"]
+        related_folder = related_project["folders"][0]["path"]
+        related_dev_branch = related_project.get("devBranch")
+        if not related_dev_branch:
+            continue  # sem branch de dev configurada, não dá pra saber o alvo do MR
+
+        try:
+            related_current = git_utils.current_branch(related_folder)
+        except git_utils.GitError:
+            continue  # pasta sem repo git válido — nada a fazer aqui
+        if related_current != branch or related_current == related_dev_branch:
+            continue  # o Claude não chegou a trabalhar nessa pasta nesta atividade
+
+        if not git_utils.is_clean(related_folder):
+            warnings.append(f"{name}: há mudanças não commitadas — MR não foi aberto aqui.")
+            continue
+
+        git_utils.fetch(related_folder)
+        ahead = 0
+        for ref in (related_dev_branch, f"origin/{related_dev_branch}"):
+            if not git_utils.ref_exists(related_folder, ref):
+                continue
+            try:
+                ahead = git_utils.commits_ahead(related_folder, ref)
+                break
+            except git_utils.GitError:
+                continue
+        if ahead == 0:
+            continue  # branch existe mas não tem commit novo — nada a abrir
+
+        try:
+            git_utils.push(related_folder, branch)
+            related_project_path = gitlab_client.project_path_from_remote(related_folder)
+            related_mr = gitlab_client.find_open_mr(related_project_path, branch)
+            related_created = False
+            if related_mr is None:
+                related_mr = gitlab_client.create_mr(
+                    related_project_path, branch, related_dev_branch, activity["title"], activity["prompt"]
+                )
+                related_created = True
+        except (git_utils.GitError, gitlab_client.GitlabError) as exc:
+            warnings.append(f"{name}: {exc}")
+            continue
+
+        related_mrs.append(
+            {
+                "projectId": related_id,
+                "projectName": name,
+                "mrUrl": related_mr["web_url"],
+                "created": related_created,
+            }
+        )
+
+    return related_mrs, warnings

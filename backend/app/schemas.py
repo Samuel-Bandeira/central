@@ -99,3 +99,6 @@ class Activity(ActivityBase):
     started: bool = False
     concluded: bool = False
     mrUrl: str | None = None
+    # projectId (de relatedProjectIds) -> URL do MR aberto nesse repo
+    # relacionado, quando a atividade também teve commits lá.
+    relatedMrUrls: dict[str, str] = {}

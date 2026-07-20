@@ -338,9 +338,14 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
     setBusyId(activity.id);
     setError(null);
     try {
-      const { terminalClosed } = await api.concludeActivity(activity.id);
+      const { terminalClosed, warnings } = await api.concludeActivity(activity.id);
+      const messages: string[] = [];
       if (!terminalClosed) {
-        setError('MR aberto, mas não consegui fechar o terminal sozinho — feche manualmente.');
+        messages.push('MR aberto, mas não consegui fechar o terminal sozinho — feche manualmente.');
+      }
+      messages.push(...warnings);
+      if (messages.length > 0) {
+        setError(messages.join(' '));
       }
       await Promise.all([refresh(), refreshRunning()]);
     } catch (err) {
@@ -511,6 +516,18 @@ export function ActivitiesPanel({ projectId, hasFolders, projects }: Props) {
                     Concluída — ver MR
                   </a>
                 )}
+                {activity.concluded &&
+                  Object.entries(activity.relatedMrUrls ?? {}).map(([relatedId, url]) => (
+                    <a
+                      key={relatedId}
+                      className="activity-status activity-status-concluded"
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      MR: {projectsById.get(relatedId)?.name ?? relatedId}
+                    </a>
+                  ))}
               </div>
               <p className="activity-prompt">{activity.prompt}</p>
               {activity.started && (

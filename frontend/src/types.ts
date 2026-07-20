@@ -77,6 +77,7 @@ export interface Activity {
   started: boolean;
   concluded: boolean;
   mrUrl: string | null;
+  relatedMrUrls: Record<string, string>;
   relatedProjectIds: string[];
   startFromDevBranch: boolean;
   branchName: string;
@@ -115,4 +116,6 @@ export interface ActivityConcludeResult {
   mrUrl: string;
   created: boolean;
   terminalClosed: boolean;
+  relatedMrs: { projectId: string; projectName: string; mrUrl: string; created: boolean }[];
+  warnings: string[];
 }

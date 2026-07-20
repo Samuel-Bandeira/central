@@ -56,6 +56,18 @@ def commits_behind(folder: str, base_ref: str) -> int:
     return int(_run(folder, "rev-list", "--count", f"HEAD..{base_ref}"))
 
 
+def commits_ahead(folder: str, base_ref: str) -> int:
+    """Quantos commits o HEAD atual tem que `base_ref` não tem — ou seja, o
+    quanto a branch atual avançou em relação a essa referência."""
+    return int(_run(folder, "rev-list", "--count", f"{base_ref}..HEAD"))
+
+
+def fetch(folder: str) -> None:
+    """`git fetch --prune`, melhor esforço — ignora erro se não houver
+    remoto configurado (mesmo padrão usado antes de comparar branches)."""
+    subprocess.run(["git", "-C", folder, "fetch", "--prune"], capture_output=True, text=True)
+
+
 def remote_url(folder: str) -> str | None:
     """URL do remoto `origin`, ou `None` se a pasta não tiver um (não
     levanta `GitError` — não ter remoto é uma situação normal, não um
