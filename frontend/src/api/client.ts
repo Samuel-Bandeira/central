@@ -4,6 +4,7 @@ import type {
   ActivityInput,
   ActivityProgress,
   ActivityStartResult,
+  ActivityStep,
   Project,
   ProjectInput,
   RunningActivities,
@@ -99,9 +100,10 @@ export const api = {
   startActivity: (id: string) => request<ActivityStartResult>(`/activities/${id}/start`, { method: 'POST' }),
   pauseActivity: (id: string) => request<{ sent: boolean }>(`/activities/${id}/pause`, { method: 'POST' }),
   concludeActivity: (id: string) => request<ActivityConcludeResult>(`/activities/${id}/conclude`, { method: 'POST' }),
-  addActivityStep: (id: string, title: string, files: File[] = []) => {
+  addActivityStep: (id: string, title: string, files: File[] = [], parentId?: string) => {
     const formData = new FormData();
     formData.set('title', title);
+    if (parentId) formData.set('parentId', parentId);
     files.forEach((file) => formData.append('files', file));
     return requestMultipart<ActivityProgress>(`/activities/${id}/steps`, 'POST', formData);
   },
@@ -117,4 +119,19 @@ export const api = {
   },
   deleteActivityAttachment: (id: string, path: string) =>
     request<{ attachments: string[] }>(`/activities/${id}/attachments`, { method: 'DELETE', body: JSON.stringify({ path }) }),
+
+  uploadActivitySpec: (id: string, file: File) => {
+    const formData = new FormData();
+    formData.set('file', file);
+    return requestMultipart<{ specFile: string }>(`/activities/${id}/spec`, 'POST', formData);
+  },
+  deleteActivitySpec: (id: string) => request<{ specFile: null }>(`/activities/${id}/spec`, { method: 'DELETE' }),
+  validateActivityStep: (id: string, stepId: string) =>
+    request<{ steps: ActivityStep[] }>(`/activities/${id}/steps/${encodeURIComponent(stepId)}/validate`, {
+      method: 'POST',
+    }),
+  releaseActivityStep: (id: string, stepId: string) =>
+    request<{ steps: ActivityStep[]; sent: boolean }>(`/activities/${id}/steps/${encodeURIComponent(stepId)}/release`, {
+      method: 'POST',
+    }),
 };

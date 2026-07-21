@@ -858,6 +858,221 @@ button {
   }
 }
 
+.activity-block-graph-wrap {
+  position: relative;
+}
+
+.activity-block-graph-expand {
+  position: absolute;
+  top: 16px;
+  right: 8px;
+  z-index: 5;
+  padding: 4px 6px;
+  line-height: 0;
+}
+
+.activity-block-graph {
+  display: flex;
+  width: 100%;
+  height: 480px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  overflow: hidden;
+}
+
+.activity-block-graph-canvas {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.activity-block-detail {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-left: 1px solid var(--border);
+  background: var(--card-bg);
+  overflow-y: auto;
+}
+
+.activity-block-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.activity-block-detail .activity-add-step {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.activity-graph-tab .activity-block-graph-wrap {
+  height: 70vh;
+  min-height: 420px;
+}
+
+.activity-graph-tab .activity-block-graph {
+  height: 100%;
+}
+
+.activity-block-graph .react-flow__attribution {
+  display: none;
+}
+
+.activity-block-graph .react-flow__controls-button {
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  fill: var(--text);
+}
+
+.activity-block-graph .react-flow__controls-button:hover {
+  background: var(--bg-canvas);
+}
+
+.block-node {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  font-size: 13px;
+  width: 260px;
+  cursor: pointer;
+}
+
+.block-node-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.block-node-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.block-node-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.block-node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.block-node-title {
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+.block-node-subtask-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.block-node-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.block-node-icon-done {
+  color: var(--success);
+}
+
+.block-node-icon-in-progress {
+  color: var(--accent);
+  animation: activity-step-spin 1s linear infinite;
+}
+
+.block-node-icon-pending {
+  color: var(--text-muted);
+}
+
+.block-node-validated {
+  border-color: var(--success);
+}
+
+.block-node-validated-badge {
+  font-size: 11px;
+  color: var(--success);
+  white-space: nowrap;
+}
+
+.block-node-validate {
+  margin-left: auto;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.block-node-validate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.activity-block-dependencies {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.activity-block-dependencies .pending-note {
+  margin: 0;
+}
+
+.activity-block-dependencies-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.activity-block-dependencies-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.activity-block-dependencies-list li svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.activity-block-dependency-ready {
+  color: var(--success) !important;
+}
+
+.activity-block-dependencies .btn {
+  align-self: flex-start;
+}
+
 .acceptance-criteria-list {
   list-style: none;
   padding: 0;
@@ -992,6 +1207,35 @@ button {
   background: var(--danger);
 }
 
+.spec-picker {
+  margin-top: 6px;
+}
+
+.spec-picker-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+
+.spec-picker-current .attachment-remove {
+  position: static;
+  background: none;
+  color: var(--text-muted);
+  width: auto;
+  height: auto;
+  border-radius: 0;
+}
+
+.spec-picker-current .attachment-remove:hover {
+  background: none;
+  color: var(--danger);
+}
+
 .attachment-thumbnails-readonly {
   margin-top: 6px;
 }
@@ -1041,6 +1285,17 @@ button {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+}
+
+.activities-new-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.activities-new-buttons .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .activity-actions .btn {

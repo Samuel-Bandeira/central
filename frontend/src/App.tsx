@@ -6,12 +6,14 @@ import { ProjectsTab } from './pages/ProjectsTab';
 import { ProjectDetailTab } from './pages/ProjectDetailTab';
 import { ActivitiesTab } from './pages/ActivitiesTab';
 import { TrelloTab } from './pages/TrelloTab';
+import { ActivityGraphTab } from './pages/ActivityGraphTab';
 
 export type Tab =
   | { id: 'projects'; kind: 'projects' }
   | { id: string; kind: 'detail'; projectId: string }
   | { id: string; kind: 'activities'; projectId: string }
-  | { id: string; kind: 'trello'; projectId: string };
+  | { id: string; kind: 'trello'; projectId: string }
+  | { id: string; kind: 'activity-graph'; projectId: string; activityId: string; activityTitle: string };
 
 const TABS_STORAGE_KEY = 'central-launcher.tabs';
 const DEFAULT_TABS: Tab[] = [{ id: 'projects', kind: 'projects' }];
@@ -72,6 +74,14 @@ function App() {
     setActiveTabId(tabId);
   }
 
+  function openActivityGraphTab(projectId: string, activityId: string, activityTitle: string) {
+    const tabId = `activity-graph-${activityId}`;
+    setTabs((prev) =>
+      prev.some((t) => t.id === tabId) ? prev : [...prev, { id: tabId, kind: 'activity-graph', projectId, activityId, activityTitle }],
+    );
+    setActiveTabId(tabId);
+  }
+
   function closeTab(tabId: string) {
     setTabs((prev) => prev.filter((t) => t.id !== tabId));
     setActiveTabId((current) => (current === tabId ? 'projects' : current));
@@ -108,6 +118,7 @@ function App() {
             key={activeTab.projectId}
             project={projects.find((p) => p.id === activeTab.projectId) ?? null}
             allProjects={projects}
+            onOpenGraph={(activity) => openActivityGraphTab(activeTab.projectId, activity.id, activity.title)}
           />
         )}
         {!loading && !error && activeTab.kind === 'trello' && (
@@ -116,6 +127,9 @@ function App() {
             project={projects.find((p) => p.id === activeTab.projectId) ?? null}
             onProjectsChange={refreshProjects}
           />
+        )}
+        {!loading && !error && activeTab.kind === 'activity-graph' && (
+          <ActivityGraphTab key={activeTab.activityId} projectId={activeTab.projectId} activityId={activeTab.activityId} projects={projects} />
         )}
       </div>
     </div>

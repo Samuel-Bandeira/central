@@ -15,16 +15,20 @@ def _safe_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "imagem"
 
 
-def save_image(scope: str, filename: str, content: bytes) -> str:
-    """Salva a imagem em ATTACHMENTS_DIR/<scope>/ com um nome único e
+def save_file(scope: str, filename: str, content: bytes) -> str:
+    """Salva qualquer arquivo em ATTACHMENTS_DIR/<scope>/ com um nome único e
     devolve o caminho absoluto salvo — esse caminho é o que entra no prompt
-    do Claude e no `src` que o frontend usa pra pedir a pré-visualização."""
+    do Claude, que lê o conteúdo sozinho com sua própria ferramenta."""
     folder = ATTACHMENTS_DIR / scope
     folder.mkdir(parents=True, exist_ok=True)
     unique_name = f"{uuid.uuid4().hex[:8]}-{_safe_filename(filename)}"
     path = folder / unique_name
     path.write_bytes(content)
     return str(path)
+
+
+def save_image(scope: str, filename: str, content: bytes) -> str:
+    return save_file(scope, filename, content)
 
 
 def delete_image(path: str) -> None:

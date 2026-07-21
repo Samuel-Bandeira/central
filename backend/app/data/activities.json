@@ -50,5 +50,21 @@
     "relatedMrUrls": {
       "proj-2450966d": "https://gitlab.com/davydmelo/ressona-backend/-/merge_requests/15"
     }
+  },
+  {
+    "title": "Sensores",
+    "prompt": "",
+    "acceptanceCriteria": [],
+    "attachments": [],
+    "specFile": "/Users/samueloliveira/development/OUTROS/central/backend/app/data/attachments/act-79aa7611/spec/097fd700-sensores.md",
+    "relatedProjectIds": [],
+    "startFromDevBranch": true,
+    "branchName": "feature/sensors",
+    "relatedStartFromDevBranch": true,
+    "id": "act-79aa7611",
+    "projectId": "proj-a27fca3f",
+    "started": true,
+    "relatedBranchNames": {},
+    "pausingSinceCommit": null
   }
 ]

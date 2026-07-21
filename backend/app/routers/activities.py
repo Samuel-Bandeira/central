@@ -23,6 +23,19 @@ CONFIRMATION_INSTRUCTION = (
     "entendimento está certo."
 )
 
+REVIEW_STEP_INSTRUCTION = (
+    "Antes de marcar qualquer passo (ou bloco, no modo blocos) como \"done\", "
+    "faça uma autorrevisão do que você acabou de implementar (releia o diff, "
+    "confira se bate com o que foi pedido, procure por erros óbvios ou "
+    "pontas soltas) e registre isso como um passo próprio no checklist (algo "
+    "como \"Revisão do que foi implementado\"), só marcando esse passo de "
+    "revisão como \"done\" depois de tê-la feito de verdade. Isso vale de "
+    "novo sempre que eu adicionar subtasks depois que o checklist (ou o "
+    "bloco) já estava todo concluído: ao terminar essas subtasks extras, "
+    "adicione um novo passo de revisão cobrindo esse trabalho adicional e "
+    "complete-o antes de considerar aquele checklist/bloco pronto outra vez."
+)
+
 ACCEPTANCE_CRITERIA_INSTRUCTION = (
     "Estes são os critérios de aceite fixados para esta atividade — o \"pronto\" "
     "real dela, definido antes de você começar. São diferentes do seu checklist "
@@ -32,6 +45,38 @@ ACCEPTANCE_CRITERIA_INSTRUCTION = (
     "Trabalhe até deixar todos satisfeitos, e ao final aponte explicitamente "
     "como cada um foi endereçado:\n{criteria}"
 )
+
+def _status_file_name(activity_id: str) -> str:
+    # Mesmo motivo do sufixo em _progress_file_name: sem ele, o STATUS.md de
+    # uma atividade vaza pra dentro de outra que reaproveite a mesma pasta/
+    # branch num momento diferente. Aplicado a todas as atividades (não só
+    # as com spec), com fallback de leitura pro nome antigo em
+    # _status_file_path — atividades já em andamento não perdem o histórico
+    # já salvo.
+    return f"STATUS-{activity_id}.md"
+
+
+def _status_file_path(folder: str, activity_id: str) -> Path:
+    new_path = Path(folder) / _status_file_name(activity_id)
+    if new_path.exists():
+        return new_path
+    legacy_path = Path(folder) / "STATUS.md"
+    return legacy_path if legacy_path.exists() else new_path
+
+
+def _pause_instruction(activity_id: str) -> str:
+    file_name = _status_file_name(activity_id)
+    return (
+        f"Pausando por aqui antes de fechar a janela. Antes de encerrar: atualize (ou "
+        f"crie) o {file_name} com um resumo de tudo que já foi discutido e decidido "
+        "nesta conversa até agora — incluindo perguntas que você fez e minhas "
+        f"respostas — o que já foi feito e o que falta. O {file_name} é histórico de "
+        "trabalho local, não deve ir pro repositório — se ele ainda não estiver no "
+        f".gitignore do projeto, adicione uma linha pra ele lá (padrão STATUS-*.md, "
+        "cobre qualquer atividade) antes de commitar. Depois, dê commit e push. Me "
+        "avise por aqui quando terminar; eu fecho esta janela manualmente."
+    )
+
 
 def _progress_file_name(activity_id: str) -> str:
     # Nomeado por atividade, não só por projeto — duas atividades podem
@@ -45,16 +90,17 @@ def _progress_file_name(activity_id: str) -> str:
 
 def _progress_instruction(activity_id: str) -> str:
     file_name = _progress_file_name(activity_id)
+    status_name = _status_file_name(activity_id)
     return (
         f"Ao longo desta atividade, mantenha um arquivo {file_name} na raiz "
         'deste projeto (não do projeto relacionado) no formato {"steps": '
         '[{"title": "...", "status": "pending|in_progress|done"}]}, listando os '
         "passos do seu plano. Atualize esse arquivo sempre que definir/ajustar o "
         "plano e sempre que iniciar ou concluir um passo — é assim que um painel "
-        "fora deste terminal acompanha seu progresso. Toda vez que atualizar esse "
-        "arquivo, atualize também o STATUS.md no mesmo momento (não só ao pausar) "
-        "com um resumo do que já foi feito/decidido até ali — assim ele nunca "
-        "fica desatualizado em relação ao progresso real. Alguns steps desse "
+        f"fora deste terminal acompanha seu progresso. Toda vez que atualizar esse "
+        f"arquivo, atualize também o {status_name} no mesmo momento (não só ao "
+        "pausar) com um resumo do que já foi feito/decidido até ali — assim ele "
+        "nunca fica desatualizado em relação ao progresso real. Alguns steps desse "
         'arquivo podem vir com "source": "user" — foram adicionados manualmente '
         "por mim fora deste terminal (pedidos extras depois de eu revisar o "
         "resultado). Nunca remova esses steps nem apague o campo \"source\" "
@@ -63,8 +109,85 @@ def _progress_instruction(activity_id: str) -> str:
         "específico desta atividade — não reaproveite um arquivo "
         ".claude-activity-status-*.json que encontrar sobrando de outra "
         "atividade, mesmo que pareça relacionado. Se ainda não estiver no "
-        ".gitignore do projeto, adicione a linha .claude-activity-status-*.json "
-        "lá (cobre qualquer atividade, não só esta)."
+        ".gitignore do projeto, adicione as linhas .claude-activity-status-*.json "
+        "e STATUS-*.md lá (cobrem qualquer atividade, não só esta). "
+        f"{REVIEW_STEP_INSTRUCTION}"
+    )
+
+
+def _block_mode_instruction(activity_id: str, spec_file: str, is_first_start: bool, project_name: str) -> str:
+    """Só injetada quando a atividade tem um .md de spec anexado (`specFile`)
+    — pede pro Claude decompor esse arquivo em blocos maiores que um passo
+    comum (ex: uma tela inteira), interligados por dependência, e travar o
+    avanço em cada um até eu validar por fora. `validated` é um campo
+    humano — mesmo espírito de AcceptanceCriterion.met (schemas.py): o
+    Claude nunca escreve nele, só lê.
+
+    A regra de trava (não avançar sem "validated": true) e a nota de escopo
+    são repetidas em TODA chamada, não só na primeira — cada abertura do
+    `claude` é uma conversa nova (sem --continue/--resume), então uma sessão
+    retomada não teria como saber disso se só fosse dito uma vez lá atrás. Já
+    o pedido de decompor a spec e escrever o plano inicial só faz sentido na
+    primeira vez — numa retomada os blocos já existem no arquivo de
+    progresso.
+
+    Nota de escopo: diferente do fluxo normal (que usa @menção +
+    relatedProjectIds pra liberar outros projetos de propósito), a "Task
+    grande" não passa nenhum --add-dir — o Claude só tem acesso de arquivo a
+    este projeto. Uma spec grande frequentemente descreve trabalho de mais
+    de uma camada (ex: uma tela de front que depende de um endpoint de
+    back); sem avisar isso explicitamente, o Claude pode tentar criar um
+    bloco pra implementar a parte que ele fisicamente não consegue tocar."""
+    file_name = _progress_file_name(activity_id)
+    scope_note = (
+        f'Você só tem acesso de arquivo a este projeto ("{project_name}") — nenhum outro '
+        "repositório está disponível aqui, mesmo que a spec descreva trabalho que "
+        "pertence a outro (ex: endpoint de backend, mudança em outro serviço). Nesses "
+        "casos, NÃO crie um bloco pra implementar essa outra parte — trate como um "
+        "contrato/dependência externa (assuma que existe ou vai existir conforme "
+        f"descrito na spec) e só crie blocos pro que precisa ser feito de fato aqui em {project_name}."
+    )
+    gating_rule = (
+        "Um bloco só pode começar quando TODOS os blocos listados em seu "
+        '"dependsOn" estiverem com status "done" E "validated": true — '
+        '"validated" é um campo que só eu escrevo, por fora deste terminal; '
+        "nunca o escreva você mesmo, nem assuma que está satisfeito sem ele "
+        "estar lá de verdade. Um bloco com \"dependsOn\" vazio (ou ausente) "
+        "não depende de nada, então essa condição já está satisfeita pra "
+        "ele — pode começar (ou retomar) esse bloco direto, sem esperar "
+        "nenhuma validação minha antes de iniciar; a espera por confirmação "
+        "só existe DEPOIS de terminar um bloco, nunca antes de começar um "
+        "que já está liberado. Sempre que terminar um bloco (status vira "
+        '"done"), aí sim pare o trabalho e aguarde nesta mesma janela — não '
+        "pule pro próximo bloco sozinho mesmo que ele pareça liberado, "
+        "espere eu confirmar por aqui que pode seguir."
+    )
+    subtask_note = (
+        "Opcionalmente, enquanto estiver trabalhando num bloco, você pode "
+        "adicionar ao mesmo array de steps itens comuns (sem id próprio, "
+        'só {"title": "...", "status": "...", "parentId": "<id-do-bloco>"}) '
+        "pra detalhar o que está sendo feito dentro dele — aparecem como "
+        "subtasks daquele bloco no painel, fora do checklist principal de "
+        "blocos. É só transparência do seu progresso interno, não interfere "
+        "em dependsOn/validated nem precisa ser exaustivo."
+    )
+    if not is_first_start:
+        return (
+            f"Esta atividade segue o modo blocos (spec em {spec_file}). {scope_note} "
+            f"{gating_rule} {subtask_note} {REVIEW_STEP_INSTRUCTION}"
+        )
+    return (
+        f"Esta atividade parte de uma spec grande anexada em {spec_file} — leia "
+        f"esse arquivo inteiro antes de mais nada. {scope_note} Quebre o trabalho "
+        "nele descrito em blocos maiores que um passo comum (pense em \"uma tela\" "
+        "ou \"uma entrega coesa\" por bloco, não um passo miúdo), e escreva esse "
+        f"plano no mesmo {file_name} do checklist de progresso, um item por bloco, "
+        'cada um com {"id": "...", "title": "...", "status": "pending|in_progress|done", '
+        '"dependsOn": ["id-de-outro-bloco", ...]} — dependsOn lista os blocos que '
+        "precisam estar prontos antes deste começar (vazio se não depende de "
+        "nenhum). Depois de escrever esse plano inicial, PARE e espere — não "
+        "comece nenhum bloco ainda, eu preciso revisar e validar o plano primeiro. "
+        f"A partir daí, {gating_rule} {subtask_note} {REVIEW_STEP_INSTRUCTION}"
     )
 
 
@@ -234,6 +357,44 @@ def delete_activity_attachment(activity_id: str, payload: ActivityAttachmentPath
     return {"attachments": remaining}
 
 
+@router.post("/activities/{activity_id}/spec")
+async def upload_activity_spec(activity_id: str, file: UploadFile = File(...)) -> dict:
+    """Anexa o .md de spec que ativa o "modo blocos" (ver
+    _block_mode_instruction) — só faz sentido antes da atividade iniciar,
+    mesmo espírito de outros campos que somem do form depois de
+    `started=true`. Um arquivo só por atividade: um novo upload substitui
+    o anterior (apaga o antigo do disco)."""
+    if not (file.filename or "").lower().endswith(".md"):
+        raise HTTPException(status_code=400, detail="Só arquivos .md são aceitos como spec.")
+    activities = _load()
+    activity = _find(activities, activity_id)
+    if activity["started"]:
+        raise HTTPException(status_code=400, detail="Essa atividade já foi iniciada — não dá pra trocar a spec agora.")
+    content = await file.read()
+    previous = activity.get("specFile")
+    saved = attachments_store.save_file(f"{activity_id}/spec", file.filename or "spec.md", content)
+    if previous:
+        attachments_store.delete_image(previous)
+    activity["specFile"] = saved
+    _save(activities)
+    return {"specFile": saved}
+
+
+@router.delete("/activities/{activity_id}/spec")
+def delete_activity_spec(activity_id: str) -> dict:
+    activities = _load()
+    activity = _find(activities, activity_id)
+    if activity["started"]:
+        raise HTTPException(status_code=400, detail="Essa atividade já foi iniciada — não dá pra remover a spec agora.")
+    spec_file = activity.get("specFile")
+    if not spec_file:
+        raise HTTPException(status_code=404, detail="Essa atividade não tem spec anexada.")
+    attachments_store.delete_image(spec_file)
+    activity["specFile"] = None
+    _save(activities)
+    return {"specFile": None}
+
+
 @router.get("/running-activities")
 def running_activities() -> dict:
     activities = _load()
@@ -282,6 +443,15 @@ def _check_pausing_activities(activities: list[dict]) -> None:
 def start_activity(activity_id: str) -> dict:
     activities = _load()
     activity = _find(activities, activity_id)
+    # Prompt é opcional na criação/edição (pra não travar o fluxo de "anexar
+    # spec e pronto" — a spec só pode ser enviada depois que a atividade já
+    # tem id, mesma limitação de anexo de imagem), mas iniciar sem nenhum
+    # dos dois não daria pro Claude nenhuma instrução real de trabalho.
+    if not activity["prompt"].strip() and not activity.get("specFile"):
+        raise HTTPException(
+            status_code=400,
+            detail="Escreva um prompt ou anexe uma spec (.md) antes de iniciar esta atividade.",
+        )
     project = _find_project(_load_projects(), activity["projectId"])
     if project is None:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
@@ -394,7 +564,8 @@ def start_activity(activity_id: str) -> dict:
     # verdade — melhor pedir o entendimento nesse caso, e nem tratar como
     # resuming (`activity["started"]` fica true independente disso, mas
     # os campos abaixo refletem a situação real do STATUS.md).
-    resuming = activity["started"] and (Path(folder) / "STATUS.md").exists()
+    status_path = _status_file_path(folder, activity_id)
+    resuming = activity["started"] and status_path.exists()
     prompt = activity["prompt"]
     # Imagens anexadas ao prompt (upload via POST /activities/{id}/attachments)
     # — o Claude não recebe binário no prompt, só o caminho de cada arquivo,
@@ -420,7 +591,11 @@ def start_activity(activity_id: str) -> dict:
             + f"\n\n{prompt}"
         )
     if resuming:
-        prompt = f"Retomando atividade. Leia o STATUS.md antes de continuar.\n\n{prompt}"
+        prompt = (
+            f"Retomando atividade. Leia o {status_path.name} antes de continuar "
+            f"(a partir de agora, salve o histórico sempre em {_status_file_name(activity_id)}, "
+            "mesmo que tenha lido um STATUS.md antigo sem sufixo).\n\n" + prompt
+        )
     else:
         prompt = f"{CONFIRMATION_INSTRUCTION}\n\n{prompt}"
 
@@ -445,6 +620,10 @@ def start_activity(activity_id: str) -> dict:
                 "atividade (alguns podem ter sido adicionados manualmente por mim depois da "
                 f"última vez que você rodou):\n{pending_notes}\n\n{prompt}"
             )
+
+    spec_file = activity.get("specFile")
+    if spec_file:
+        prompt = f"{_block_mode_instruction(activity_id, spec_file, is_first_start, project['name'])}\n\n{prompt}"
 
     prompt = f"{_progress_instruction(activity_id)}\n\n{prompt}"
 
@@ -471,7 +650,10 @@ def get_activity_progress(activity_id: str) -> dict:
 
 @router.post("/activities/{activity_id}/steps")
 async def add_activity_step(
-    activity_id: str, title: str = Form(...), files: list[UploadFile] = File(default=[])
+    activity_id: str,
+    title: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+    parentId: str | None = Form(default=None),
 ) -> dict:
     """Adiciona um passo manual ao checklist de progresso da atividade —
     marcado com `source: "user"` pra distinguir dos passos que o próprio
@@ -479,7 +661,12 @@ async def add_activity_step(
     remover steps com essa marca). Aceita imagens junto (multipart, não
     JSON) — salvas numa subpasta própria do step dentro do escopo da
     atividade, reinjetadas no prompt em `start_activity` quando o passo
-    ainda estiver pendente."""
+    ainda estiver pendente.
+
+    `parentId`, quando presente, amarra esse passo a um bloco específico
+    (modo blocos, ver `_block_mode_instruction`) — vira uma subtask exibida
+    no painel de detalhe daquele bloco no diagrama, em vez do checklist
+    "solto" da atividade."""
     activities = _load()
     activity = _find(activities, activity_id)
     folder = _project_folder(activity["projectId"])
@@ -488,6 +675,8 @@ async def add_activity_step(
         raise HTTPException(status_code=400, detail="Título do passo não pode ser vazio.")
     steps = _read_progress(folder, activity_id)
     step: dict = {"title": title, "status": "pending", "source": "user"}
+    if parentId:
+        step["parentId"] = parentId
     if files:
         step["attachments"] = await _save_uploaded_images(f"{activity_id}/steps", files)
     steps.append(step)
@@ -517,11 +706,62 @@ def delete_activity_step(activity_id: str, payload: ActivityStepTitle) -> dict:
     )
 
 
+@router.post("/activities/{activity_id}/steps/{step_id}/validate")
+def validate_activity_step(activity_id: str, step_id: str) -> dict:
+    """Marca um bloco (passo com `id`, modo blocos) como aprovado pelo
+    humano — só o humano chama isso, mesmo espírito de
+    AcceptanceCriterion.met. De propósito NÃO libera o Claude pra seguir
+    sozinho (ver `release_activity_step` pra isso): entre aprovar e liberar
+    a próxima etapa eu ainda posso pedir subtasks extras neste bloco (POST
+    .../steps com parentId), e só libero depois que elas também estiverem
+    resolvidas."""
+    activities = _load()
+    activity = _find(activities, activity_id)
+    folder = _project_folder(activity["projectId"])
+    steps = _read_progress(folder, activity_id)
+    for step in steps:
+        if step.get("id") == step_id:
+            step["validated"] = True
+            _write_progress(folder, activity_id, steps)
+            return {"steps": steps}
+    raise HTTPException(status_code=404, detail="Esse bloco não existe no checklist desta atividade.")
+
+
+@router.post("/activities/{activity_id}/steps/{step_id}/release")
+def release_activity_step(activity_id: str, step_id: str) -> dict:
+    """Libera o Claude pra seguir pro(s) próximo(s) bloco(s) cujas
+    dependências já estejam satisfeitas — só depois que eu já aprovei este
+    bloco (`validated`, ver `validate_activity_step`) E todas as subtasks
+    amarradas a ele (parentId == step_id) estiverem "done", incluindo as
+    que eu pedir depois da aprovação inicial. Sem essa segunda trava,
+    aprovar cedo demais deixaria pedidos extras pendentes pra trás. Mesmo
+    best-effort de `pause_activity` quanto ao terminal: se não houver
+    janela aberta agora, a liberação não é reenviada automaticamente depois
+    — a atividade precisa ser retomada pra o Claude ver o estado atual."""
+    activities = _load()
+    activity = _find(activities, activity_id)
+    folder = _project_folder(activity["projectId"])
+    steps = _read_progress(folder, activity_id)
+    block = next((s for s in steps if s.get("id") == step_id), None)
+    if block is None:
+        raise HTTPException(status_code=404, detail="Esse bloco não existe no checklist desta atividade.")
+    if not block.get("validated"):
+        raise HTTPException(status_code=400, detail="Aprove este bloco antes de liberar a próxima etapa.")
+    pending_subtasks = [s for s in steps if s.get("parentId") == step_id and s.get("status") != "done"]
+    if pending_subtasks:
+        raise HTTPException(
+            status_code=400,
+            detail="Ainda há subtasks pendentes neste bloco — resolva-as antes de liberar a próxima etapa.",
+        )
+    sent = claude_terminal.send_advance_instruction(activity_id, block.get("title", step_id))
+    return {"steps": steps, "sent": sent}
+
+
 @router.post("/activities/{activity_id}/pause")
 def pause_activity(activity_id: str) -> dict:
     activities = _load()
     activity = _find(activities, activity_id)
-    sent = claude_terminal.send_pause_instruction(activity_id)
+    sent = claude_terminal.send_pause_instruction(activity_id, _pause_instruction(activity_id))
     if sent:
         # Marca o commit atual como "linha de base" — quando um commit
         # novo aparecer nessa branch, `_check_pausing_activities` (chamado
@@ -564,6 +804,11 @@ def conclude_activity(activity_id: str) -> dict:
     steps = _read_progress(folder, activity_id)
     if not steps or any(step.get("status") != "done" for step in steps):
         raise HTTPException(status_code=400, detail="Ainda há passos pendentes no checklist da atividade.")
+    # Passos com `id` são blocos (modo blocos, ver _block_mode_instruction) —
+    # "done" ali é só o que o Claude acha, "validated" é a confirmação minha
+    # de fora. Concluir a atividade não pode passar por cima disso.
+    if any(step.get("id") and not step.get("validated") for step in steps):
+        raise HTTPException(status_code=400, detail="Ainda há blocos concluídos que você não validou.")
 
     criteria = activity.get("acceptanceCriteria", [])
     if criteria and any(not c.get("met") for c in criteria):

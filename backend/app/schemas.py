@@ -75,7 +75,10 @@ class AcceptanceCriterion(BaseModel):
 
 class ActivityBase(BaseModel):
     title: str
-    prompt: str
+    # Obrigatório só quando não há specFile (validado na rota, não aqui — ver
+    # nota em ActivityCreate/ActivityUpdate). Com spec anexada, o prompt é
+    # opcional: a instrução de decompor o arquivo em blocos já basta.
+    prompt: str = ""
     acceptanceCriteria: list[AcceptanceCriterion] = []
     # Caminhos absolutos de imagens anexadas ao prompt (salvas via
     # POST/DELETE /activities/{id}/attachments) — o Claude Code não recebe
@@ -83,6 +86,12 @@ class ActivityBase(BaseModel):
     # de arquivo) em start_activity, e ele lê cada uma com sua própria
     # ferramenta de leitura.
     attachments: list[str] = []
+    # Caminho absoluto de um .md de spec anexado (POST/DELETE /activities/{id}/spec).
+    # Quando presente, ativa o "modo blocos": o prompt injeta uma instrução pro
+    # Claude decompor esse arquivo em blocos interligados (ver
+    # _progress_instruction em routers/activities.py) em vez do checklist plano
+    # normal, e o front renderiza um grafo em vez da lista de passos.
+    specFile: str | None = None
     relatedProjectIds: list[str] = []
     startFromDevBranch: bool = True
     # Obrigatório só quando startFromDevBranch=true (validado na rota, não

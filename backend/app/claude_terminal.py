@@ -10,17 +10,6 @@ APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "central-lau
 PROMPTS_DIR = APP_SUPPORT_DIR / "claude-prompts"
 WINDOW_IDS_PATH = APP_SUPPORT_DIR / "claude-window-ids.json"
 
-PAUSE_INSTRUCTION = (
-    "Pausando por aqui antes de fechar a janela. Antes de encerrar: atualize (ou "
-    "crie) o STATUS.md com um resumo de tudo que já foi discutido e decidido "
-    "nesta conversa até agora — incluindo perguntas que você fez e minhas "
-    "respostas — o que já foi feito e o que falta. O STATUS.md é histórico de "
-    "trabalho local, não deve ir pro repositório — se ele ainda não estiver no "
-    ".gitignore do projeto, adicione uma linha pra ele lá antes de commitar. "
-    "Depois, dê commit e push. Me avise por aqui quando terminar; eu fecho "
-    "esta janela manualmente."
-)
-
 
 def _escape_for_applescript(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
@@ -166,11 +155,47 @@ def open_claude_window(activity_id: str, folder: str, prompt: str, related_folde
         _save_window_ids(window_ids)
 
 
-def send_pause_instruction(activity_id: str) -> bool:
-    """Não fecha a janela. Em vez disso "digita" (via AppleScript, `do
-    script ... in window id X`) um pedido pro Claude atualizar o STATUS.md
-    com o que foi discutido/decidido até agora (incluindo perguntas e
-    respostas da conversa) e dar commit+push antes de encerrar.
+def _type_into_window(window_id: int, text: str) -> None:
+    """"Digita" `text` na janela do Terminal via AppleScript (`do script ...
+    in window id X`), em 3 chamadas separadas — técnica testada e corrigida
+    várias vezes em produção, cada detalhe abaixo veio de um bug real:
+
+    1. Um Esc sozinho primeiro: se o Claude estiver parado num menu de
+       permissão (escolha numerada tipo "1. Yes / 2. Yes, allow.../ 3. No"),
+       digitar texto + Enter direto confirma a opção selecionada em vez de
+       virar mensagem de chat — o Esc fecha esse menu e volta pro prompt
+       normal antes de digitarmos de verdade.
+    2. Uma pausa depois do Esc: mandá-lo colado direto no texto (numa `do
+       script` só) é um erro clássico de automação de terminal — se os dois
+       chegam rápido demais, o parser interpreta como atalho Meta/Alt+tecla
+       em vez de duas teclas separadas, e come o primeiro caractere do texto
+       (confirmado na prática: "teste" virou "este").
+    3. Um Enter vazio numa chamada própria, no final, com pausa antes: um
+       bloco grande de texto chegando de uma vez costuma ser tratado pelo
+       terminal como "colar" (paste), e a maioria das TUIs de chat trata
+       Enter dentro de um paste como quebra de linha, não como "enviar"
+       (confirmado na prática: o texto ficou digitado, sem enviar)."""
+    escape_script = f'tell application "Terminal" to do script (ASCII character 27) in window id {window_id}'
+    subprocess.run(["osascript", "-e", escape_script], capture_output=True, text=True)
+    time.sleep(0.3)
+
+    text_script = f"""
+    tell application "Terminal"
+        do script "{_escape_for_applescript(text)}" in window id {window_id}
+    end tell
+    """
+    subprocess.run(["osascript", "-e", text_script], capture_output=True, text=True)
+    time.sleep(0.3)
+
+    submit_script = f'tell application "Terminal" to do script "" in window id {window_id}'
+    subprocess.run(["osascript", "-e", submit_script], capture_output=True, text=True)
+
+
+def send_pause_instruction(activity_id: str, instruction_text: str) -> bool:
+    """Não fecha a janela. Em vez disso "digita" (via `_type_into_window`) um
+    pedido pro Claude salvar o progresso (texto montado por quem chama —
+    `routers/activities.py`, dono de todas as strings de instrução do app)
+    antes de encerrar.
 
     Fechar a janela direto (o que essa função fazia antes) dependia da
     própria preferência do Terminal.app de perguntar "tem processo rodando,
@@ -179,19 +204,26 @@ def send_pause_instruction(activity_id: str) -> bool:
     nada. Em vez de depender disso, avisamos o Claude e deixamos você
     fechar a janela manualmente depois que ele confirmar que terminou.
 
-    Manda um Esc antes do texto: se o Claude estiver parado num menu de
-    permissão (escolha numerada tipo "1. Yes / 2. Yes, allow.../ 3. No"),
-    digitar texto + Enter direto confirma a opção selecionada em vez de
-    virar mensagem de chat — o Esc fecha esse menu e volta pro prompt
-    normal antes de digitarmos de verdade.
+    Retorna False se não há janela conhecida (ou ela já fechou) pra essa
+    atividade."""
+    window_ids = _load_window_ids()
+    window_id = window_ids.get(activity_id)
+    if window_id is None or not _window_exists(window_id):
+        return False
+    _type_into_window(window_id, instruction_text)
+    return True
 
-    O Esc vai numa chamada separada, com uma pausa antes do texto. Mandar
-    Esc colado direto no texto (numa `do script` só) é um erro clássico de
-    automação de terminal: se os dois chegam rápido demais, o parser do
-    terminal interpreta como um atalho Meta/Alt+tecla em vez de duas teclas
-    separadas, e come o primeiro caractere do texto (confirmado na prática:
-    "teste" virou "este"). A pausa dá tempo do parser fechar a sequência de
-    escape antes do texto real chegar.
+
+def send_advance_instruction(activity_id: str, block_title: str) -> bool:
+    """Mesma técnica de `send_pause_instruction`, mas pra destravar (não
+    pausar): avisa que um bloco foi aprovado e liberado por fora e que o
+    Claude pode seguir pro(s) próximo(s) bloco(s) do plano cujas
+    dependências já estejam satisfeitas — usado pelo endpoint "Liberar
+    próxima etapa" das tasks grandes (ver `release_activity_step` em
+    routers/activities.py), que só chega a ser chamado depois que o bloco
+    foi aprovado E todas as subtasks dele já estão resolvidas. A janela
+    continua aberta o tempo todo; isso só desbloqueia o próximo passo do
+    trabalho, não abre/fecha nada.
 
     Retorna False se não há janela conhecida (ou ela já fechou) pra essa
     atividade."""
@@ -199,27 +231,13 @@ def send_pause_instruction(activity_id: str) -> bool:
     window_id = window_ids.get(activity_id)
     if window_id is None or not _window_exists(window_id):
         return False
-
-    escape_script = f'tell application "Terminal" to do script (ASCII character 27) in window id {window_id}'
-    subprocess.run(["osascript", "-e", escape_script], capture_output=True, text=True)
-    time.sleep(0.3)
-
-    text_script = f"""
-    tell application "Terminal"
-        do script "{_escape_for_applescript(PAUSE_INSTRUCTION)}" in window id {window_id}
-    end tell
-    """
-    subprocess.run(["osascript", "-e", text_script], capture_output=True, text=True)
-    time.sleep(0.3)
-
-    # Um bloco grande de texto chegando de uma vez costuma ser tratado pelo
-    # terminal como "colar" (paste) — e a maioria das TUIs de chat trata
-    # Enter dentro de um paste como quebra de linha, não como "enviar"
-    # (proteção padrão pra colar texto multi-linha sem submeter no meio).
-    # Confirmado na prática: o texto ficou digitado, sem enviar. Por isso
-    # manda um Enter separado, depois, como evento próprio.
-    submit_script = f'tell application "Terminal" to do script "" in window id {window_id}'
-    subprocess.run(["osascript", "-e", submit_script], capture_output=True, text=True)
+    text = (
+        f'O bloco "{block_title}" foi aprovado por mim e todas as subtasks dele '
+        "já estão resolvidas. Pode seguir para o(s) próximo(s) bloco(s) do plano "
+        "cujas dependências já estejam satisfeitas (status \"done\" e "
+        "\"validated\": true) — sem pular nenhum que ainda não esteja liberado."
+    )
+    _type_into_window(window_id, text)
     return True
 
 
