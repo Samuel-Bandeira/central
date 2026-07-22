@@ -1,7 +1,18 @@
-import { useRef, useState } from 'react';
-import { FiCheckSquare, FiFileText, FiMaximize2, FiSquare, FiX } from 'react-icons/fi';
+import { useEffect, useRef, useState } from 'react';
+import {
+  FiCheckSquare,
+  FiCornerUpRight,
+  FiEdit3,
+  FiFileText,
+  FiMaximize2,
+  FiMinusCircle,
+  FiPlusCircle,
+  FiRefreshCw,
+  FiSquare,
+  FiX,
+} from 'react-icons/fi';
 import { api, ApiError } from '../api/client';
-import type { AcceptanceCriterion, Activity, ActivityStep, Project } from '../types';
+import type { AcceptanceCriterion, Activity, ActivityDiffFile, ActivityStep, Project } from '../types';
 import { ActivityBlockGraph } from './ActivityBlockGraph';
 import { ActivityProgressList, AttachmentPicker, ReadOnlyAttachments, extractImageFiles } from './activityShared';
 
@@ -267,6 +278,60 @@ function AcceptanceCriteriaList({ criteria, onToggle }: AcceptanceCriteriaListPr
   );
 }
 
+const DIFF_STATUS_ICON: Record<ActivityDiffFile['status'], React.ReactNode> = {
+  added: <FiPlusCircle className="activity-diff-icon activity-diff-icon-added" />,
+  modified: <FiEdit3 className="activity-diff-icon activity-diff-icon-modified" />,
+  deleted: <FiMinusCircle className="activity-diff-icon activity-diff-icon-deleted" />,
+  renamed: <FiCornerUpRight className="activity-diff-icon activity-diff-icon-renamed" />,
+};
+
+interface ActivityDiffSummaryBoxProps {
+  files: ActivityDiffFile[];
+  loading: boolean;
+  onRefresh: () => void;
+}
+
+// Lista real de arquivos que a atividade tocou, calculada via `git diff`
+// no backend (GET /activities/{id}/diff-summary) — diferente do "summary"
+// (prosa do Claude sobre o que/porquê), essa aqui não depende dele lembrar
+// certo cada arquivo numa spec grande com muitos blocos: é o próprio git.
+// Sem poll automático (é um subprocess de git a cada chamada) — busca uma
+// vez quando a atividade começa e tem um botão de atualizar manual.
+function ActivityDiffSummaryBox({ files, loading, onRefresh }: ActivityDiffSummaryBoxProps) {
+  const [expanded, setExpanded] = useState(false);
+  if (files.length === 0 && !loading) return null;
+
+  return (
+    <div className="activity-diff-summary">
+      <button type="button" className="activity-diff-summary-toggle" onClick={() => setExpanded((v) => !v)}>
+        <span>{loading ? 'Calculando arquivos alterados…' : `Arquivos alterados (${files.length})`}</span>
+      </button>
+      <button
+        type="button"
+        className="btn btn-icon activity-diff-summary-refresh"
+        aria-label="Atualizar lista de arquivos alterados"
+        title="Atualizar lista de arquivos alterados"
+        onClick={onRefresh}
+        disabled={loading}
+      >
+        <FiRefreshCw size={13} />
+      </button>
+      {expanded && (
+        <ul className="activity-diff-summary-list">
+          {files.map((f) => (
+            <li key={f.path}>
+              {DIFF_STATUS_ICON[f.status]}
+              <span>
+                {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface StartOriginChoiceProps {
   value: boolean;
   onChange: (value: boolean) => void;
@@ -333,6 +398,11 @@ export interface ActivityCardProps {
   needsAttention: boolean;
   steps: ActivityStep[];
   onStepsChange: (steps: ActivityStep[]) => void;
+  // Visão geral que o Claude mantém sobre a atividade (ver
+  // SUMMARY_FIELD_INSTRUCTION no backend) — string vazia até ele escrever
+  // o primeiro entendimento. Sobrevive à fragmentação do checklist em
+  // passos/blocos miúdos, é o que dá o contexto do todo.
+  summary: string;
   // Recarrega os dados da atividade (ou da lista inteira, dependendo de
   // quem chama) — chamado depois de qualquer operação que muda a atividade.
   onChanged: () => Promise<void>;
@@ -359,6 +429,7 @@ export function ActivityCard({
   needsAttention,
   steps,
   onStepsChange,
+  summary,
   onChanged,
   onRefreshRunning,
   onOpenGraph,
@@ -376,8 +447,60 @@ export function ActivityCard({
   const [newStepTitle, setNewStepTitle] = useState('');
   const [newStepFiles, setNewStepFiles] = useState<File[]>([]);
   const [savingStep, setSavingStep] = useState(false);
+  // Bloco novo de verdade (nó próprio no diagrama, com dependsOn) — não
+  // confundir com "+ Subtask" acima, que só adiciona um passo solto ou
+  // amarrado a um bloco JÁ existente. Só faz sentido em atividades no
+  // modo blocos (ver activity.specFile mais abaixo).
+  const [addingBlock, setAddingBlock] = useState(false);
+  const [newBlockTitle, setNewBlockTitle] = useState('');
+  const [newBlockDependsOn, setNewBlockDependsOn] = useState<string[]>([]);
+  // Spec própria desse bloco (opcional) — mesma ideia do specFile da
+  // atividade inteira, só que escopada a este bloco só (ex: o backend
+  // mandou um .md novo dos endpoints reais, isso vira o escopo de um
+  // bloco de ajuste em vez de eu ter que colar o conteúdo em algum lugar).
+  const [newBlockSpecFile, setNewBlockSpecFile] = useState<File | null>(null);
+  const [savingBlock, setSavingBlock] = useState(false);
+  // Setado quando o bloco foi criado mas o aviso não foi mandado (Claude
+  // parecia ocupado) — diferente de "Liberar", clicar de novo em
+  // "Adicionar bloco" criaria um bloco duplicado, então o retry usa um
+  // endpoint separado que só reenvia o aviso pro bloco já existente.
+  const [pendingBlockNotify, setPendingBlockNotify] = useState<{ id: string; title: string } | null>(null);
+  const [notifyingBlock, setNotifyingBlock] = useState(false);
   const [validatingStepId, setValidatingStepId] = useState<string | null>(null);
   const [releasingStepId, setReleasingStepId] = useState<string | null>(null);
+  // Setado quando o backend acha (best-effort) que o Claude está
+  // ativamente trabalhando agora — mandar o aviso de liberação envolve um
+  // Esc automatizado que pode interromper esse turno. Primeiro clique fica
+  // parado aqui pedindo confirmação; um segundo clique no MESMO bloco
+  // reenvia com confirm=true, ignorando a checagem.
+  const [confirmReleaseStepId, setConfirmReleaseStepId] = useState<string | null>(null);
+  // Confirmação do clique em si — separada da pill "liberado" que fica no
+  // card do bloco (essa é permanente, não pode dizer "aguarde" pra sempre;
+  // ver flowStatusOf em ActivityBlockGraph). Só aparece na hora, some na
+  // próxima ação.
+  const [releaseFeedback, setReleaseFeedback] = useState<string | null>(null);
+  const [diffFiles, setDiffFiles] = useState<ActivityDiffFile[]>([]);
+  const [loadingDiff, setLoadingDiff] = useState(false);
+
+  async function refreshDiffSummary() {
+    setLoadingDiff(true);
+    try {
+      const { files } = await api.getActivityDiffSummary(activity.id);
+      setDiffFiles(files);
+    } catch {
+      // é um extra informativo (git diff) — falha aqui não deveria travar a tela
+    } finally {
+      setLoadingDiff(false);
+    }
+  }
+
+  // Sem poll contínuo (cada chamada roda `git diff` de verdade) — busca
+  // uma vez quando a atividade passa a existir/estar iniciada, e de novo
+  // manualmente via o botão de atualizar (ver ActivityDiffSummaryBox).
+  useEffect(() => {
+    if (activity.started) refreshDiffSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity.id, activity.started]);
 
   function startEditing() {
     setEditForm({
@@ -527,10 +650,71 @@ export function ActivityCard({
     }
   }
 
+  async function handleAddBlock() {
+    const title = newBlockTitle.trim();
+    if (!title || savingBlock) return;
+    setError(null);
+    setPendingBlockNotify(null);
+    setSavingBlock(true);
+    try {
+      const { steps, sent, needsConfirmation, blockId } = await api.addActivityBlock(
+        activity.id,
+        title,
+        newBlockDependsOn,
+        newBlockSpecFile ?? undefined,
+      );
+      onStepsChange(steps);
+      setNewBlockTitle('');
+      setNewBlockDependsOn([]);
+      setNewBlockSpecFile(null);
+      setAddingBlock(false);
+      if (needsConfirmation) {
+        setPendingBlockNotify({ id: blockId, title });
+        setError(
+          'Bloco criado, mas o Claude parece estar trabalhando ativamente agora — o aviso não foi mandado pra não arriscar interromper esse turno.',
+        );
+      } else if (!sent) {
+        setError('Bloco adicionado, mas não encontrei o terminal aberto agora — o Claude vai ver isso na próxima retomada.');
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingBlock(false);
+    }
+  }
+
+  async function handleNotifyBlock() {
+    if (!pendingBlockNotify || notifyingBlock) return;
+    setNotifyingBlock(true);
+    setError(null);
+    try {
+      const { sent } = await api.notifyActivityBlock(activity.id, pendingBlockNotify.id);
+      setPendingBlockNotify(null);
+      if (!sent) {
+        setError('Não encontrei o terminal aberto agora — o Claude vai ver o bloco novo na próxima retomada.');
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setNotifyingBlock(false);
+    }
+  }
+
   async function handleDeleteStep(title: string) {
     setError(null);
     try {
       const { steps } = await api.deleteActivityStep(activity.id, title);
+      onStepsChange(steps);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    }
+  }
+
+  async function handleDeleteBlock(blockId: string, title: string) {
+    if (!confirm(`Excluir o bloco "${title}"? Isso também remove as subtasks dele e tira essa dependência de outros blocos.`)) return;
+    setError(null);
+    try {
+      const { steps } = await api.deleteActivityBlock(activity.id, blockId);
       onStepsChange(steps);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -568,16 +752,29 @@ export function ActivityCard({
   }
 
   async function handleReleaseStep(stepId: string) {
+    const confirm = confirmReleaseStepId === stepId;
     setReleasingStepId(stepId);
     setError(null);
+    setReleaseFeedback(null);
     try {
-      const { steps, sent } = await api.releaseActivityStep(activity.id, stepId);
+      const { steps, sent, needsConfirmation } = await api.releaseActivityStep(activity.id, stepId, confirm);
       onStepsChange(steps);
-      if (!sent) {
-        setError('Próxima etapa liberada, mas não encontrei o terminal aberto agora — o Claude vai ver isso na próxima retomada.');
+      if (needsConfirmation) {
+        setConfirmReleaseStepId(stepId);
+        setError(
+          'O Claude parece estar trabalhando ativamente agora (em outro bloco) — liberar pode interromper esse turno no meio. Clique em "Liberar próxima etapa" de novo pra confirmar mesmo assim.',
+        );
+      } else {
+        setConfirmReleaseStepId(null);
+        if (sent) {
+          setReleaseFeedback('Liberado! O Claude vai ver o aviso e seguir pro(s) próximo(s) bloco(s) liberado(s).');
+        } else {
+          setError('Próxima etapa liberada, mas não encontrei o terminal aberto agora — o Claude vai ver isso na próxima retomada.');
+        }
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
+      setConfirmReleaseStepId(null);
     } finally {
       setReleasingStepId(null);
     }
@@ -708,6 +905,11 @@ export function ActivityCard({
           ? 'Ainda há critérios de aceite não confirmados.'
           : 'Abre (ou reaproveita) um MR no GitLab e fecha o terminal — checklist de passos concluído e critérios de aceite confirmados';
   const blockSteps = steps.filter((s) => s.id);
+  // Último bloco já concluído (por ordem no array, sem timestamp real de
+  // conclusão) — o backend já força essa dependência em qualquer bloco
+  // novo (ver add_activity_block), isso aqui é só pra mostrar certo no
+  // formulário: marcado e travado, não uma sugestão que dá pra desmarcar.
+  const lastDoneBlockId = [...blockSteps].reverse().find((b) => b.status === 'done')?.id ?? null;
   // Subtasks amarrados a um bloco (parentId) aparecem no painel de detalhe
   // daquele bloco no diagrama, não aqui — só sobra pro checklist "solto" o
   // que não pertence a nenhum bloco específico.
@@ -748,6 +950,14 @@ export function ActivityCard({
           ))}
       </div>
       {error && <p className="pending-note field-error">{error}</p>}
+      {pendingBlockNotify && (
+        <p className="pending-note field-error activity-block-notify-retry">
+          <button type="button" className="btn" disabled={notifyingBlock} onClick={handleNotifyBlock}>
+            {notifyingBlock ? '…' : `Mandar aviso do bloco "${pendingBlockNotify.title}" mesmo assim`}
+          </button>
+        </p>
+      )}
+      {releaseFeedback && <p className="pending-note field-success">{releaseFeedback}</p>}
       {concludeResult && (
         <p className="pending-note field-success">
           {concludeResult.created ? 'MR aberto' : 'MR já existente reaproveitado'}:{' '}
@@ -764,6 +974,13 @@ export function ActivityCard({
           ))}
         </p>
       )}
+      {summary && (
+        <div className="activity-summary">
+          <span className="activity-summary-label">Resumo (Claude)</span>
+          <p>{summary}</p>
+        </div>
+      )}
+      <ActivityDiffSummaryBox files={diffFiles} loading={loadingDiff} onRefresh={refreshDiffSummary} />
       <p className="activity-prompt">{activity.prompt}</p>
       <ReadOnlyAttachments paths={activity.attachments} />
       <AcceptanceCriteriaList criteria={activity.acceptanceCriteria} onToggle={handleToggleCriterion} />
@@ -787,9 +1004,11 @@ export function ActivityCard({
                 busyStepId={validatingStepId}
                 onValidate={handleValidateStep}
                 releasingStepId={releasingStepId}
+                confirmReleaseStepId={confirmReleaseStepId}
                 onRelease={handleReleaseStep}
                 onAddSubtask={handleAddBlockSubtask}
                 onDeleteSubtask={handleDeleteStep}
+                onDeleteBlock={handleDeleteBlock}
               />
             </div>
           )}
@@ -831,6 +1050,77 @@ export function ActivityCard({
               setAddingStep(false);
               setNewStepTitle('');
               setNewStepFiles([]);
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+      {activity.started && addingBlock && (
+        <div className="activity-add-step activity-add-block">
+          <input
+            autoFocus
+            value={newBlockTitle}
+            disabled={savingBlock}
+            onChange={(e) => setNewBlockTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && !savingBlock) {
+                setAddingBlock(false);
+                setNewBlockTitle('');
+                setNewBlockDependsOn([]);
+                setNewBlockSpecFile(null);
+              }
+            }}
+            placeholder="Título do bloco novo (ex: um pedido extra depois que tudo terminou)"
+          />
+          {blockSteps.length > 0 && (
+            <div className="activity-add-block-deps">
+              <span className="field-hint">
+                Depende de {lastDoneBlockId ? '(o último bloco concluído é sempre incluído automaticamente)' : '(opcional)'}:
+              </span>
+              {blockSteps.map((b) => {
+                const isLastDone = b.id === lastDoneBlockId;
+                return (
+                  <label key={b.id} className="activity-add-block-dep">
+                    <input
+                      type="checkbox"
+                      checked={isLastDone || newBlockDependsOn.includes(b.id!)}
+                      disabled={isLastDone}
+                      title={isLastDone ? 'Sempre incluído: bloco novo nunca fica sem depender do último concluído' : undefined}
+                      onChange={(e) =>
+                        setNewBlockDependsOn((prev) =>
+                          e.target.checked ? [...prev, b.id!] : prev.filter((id) => id !== b.id),
+                        )
+                      }
+                    />
+                    {b.title}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <SpecPicker
+            existing={null}
+            pendingFile={newBlockSpecFile}
+            onPick={setNewBlockSpecFile}
+            onRemovePending={() => setNewBlockSpecFile(null)}
+          />
+          <span className="field-hint">
+            Opcional: anexe um .md com o escopo específico deste bloco (ex: um documento novo de endpoints).
+            O Claude lê esse arquivo antes de trabalhar nele.
+          </span>
+          <button type="button" className="btn btn-primary" disabled={savingBlock} onClick={handleAddBlock}>
+            {savingBlock ? 'Salvando…' : 'Adicionar bloco'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={savingBlock}
+            onClick={() => {
+              setAddingBlock(false);
+              setNewBlockTitle('');
+              setNewBlockDependsOn([]);
+              setNewBlockSpecFile(null);
             }}
           >
             Cancelar
@@ -882,6 +1172,21 @@ export function ActivityCard({
             }}
           >
             + Subtask
+          </button>
+        )}
+        {activity.started && !!activity.specFile && !addingBlock && (
+          <button
+            type="button"
+            className="btn"
+            title="Adiciona um bloco novo ao diagrama (com dependências próprias) — útil pra um pedido extra depois que os blocos originais terminaram"
+            onClick={() => {
+              setAddingBlock(true);
+              setNewBlockTitle('');
+              setNewBlockDependsOn([]);
+              setNewBlockSpecFile(null);
+            }}
+          >
+            + Bloco
           </button>
         )}
         <button type="button" className="btn" onClick={startEditing}>

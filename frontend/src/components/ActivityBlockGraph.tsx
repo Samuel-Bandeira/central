@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -12,7 +12,8 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { FiCheckCircle, FiLoader, FiCircle, FiX } from 'react-icons/fi';
+import { FiCheckCircle, FiFileText, FiLoader, FiCircle, FiTrash2, FiX } from 'react-icons/fi';
+import { attachmentUrl } from '../types';
 import type { ActivityStep } from '../types';
 import { ActivityProgressList, AttachmentPicker } from './activityShared';
 
@@ -22,11 +23,11 @@ import { ActivityProgressList, AttachmentPicker } from './activityShared';
 const BASE_FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 
 const COLUMN_WIDTH = 300;
-// 130 (não 110) porque agora o nó pode ter uma segunda linha (badges/botão
-// de aprovar ou liberar, ver block-node-footer) abaixo do título — sem
-// esse espaço extra, dois blocos no mesmo nível (mesma coluna) se
-// sobrepunham quando um deles crescia.
-const ROW_HEIGHT = 130;
+// Espaço extra (não 110) porque o nó pode crescer com a linha de status
+// (aprovado/liberado, ver block-node-status-row) e a linha de botões
+// abaixo do título — sem essa folga, dois blocos no mesmo nível (mesma
+// coluna) se sobrepunham quando um deles crescia.
+const ROW_HEIGHT = 150;
 
 interface Props {
   steps: ActivityStep[];
@@ -42,8 +43,19 @@ interface Props {
   // sozinho, dá espaço pra pedir subtasks extras antes de liberar.
   onRelease: (stepId: string) => void;
   releasingStepId: string | null;
+  // Setado (pelo ActivityCard) quando um clique anterior em "Liberar"
+  // nesse bloco específico voltou pedindo confirmação — o Claude parecia
+  // estar ativamente trabalhando (em outro bloco) e mandar o aviso
+  // envolve um Esc automatizado que pode interromper esse turno. Muda o
+  // botão pra um estado de "clique de novo pra confirmar" em vez de
+  // mandar direto.
+  confirmReleaseStepId: string | null;
   onAddSubtask: (blockId: string, title: string, files: File[]) => Promise<void>;
   onDeleteSubtask: (title: string) => void;
+  // Só blocos criados manualmente (source: "user", ver +Bloco em
+  // ActivityCard) podem ser excluídos — os que vieram da decomposição
+  // original da spec não aparecem com essa opção.
+  onDeleteBlock: (blockId: string, title: string) => void;
 }
 
 // Nível de cada bloco = 1 + maior nível das suas dependências (0 se não
@@ -79,6 +91,21 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   pending: <FiCircle className="block-node-icon block-node-icon-pending" />,
 };
 
+// Um bloco só tem UM status de fluxo por vez (nunca "aprovado" e "liberado"
+// ao mesmo tempo como duas pills separadas — foi isso que quebrava o
+// layout do node antes) — em vez de acumular badges, essa função decide
+// qual frase mostrar. "released" é um fato PERMANENTE (nunca desfeito),
+// então o texto tem que continuar verdadeiro muito depois do clique —
+// nada de "aguarde o Claude"/pulso aqui (isso já rodou e foi resolvido há
+// muito tempo em blocos antigos; a confirmação de "acabei de clicar" é
+// séparada, ver handleReleaseStep em ActivityCard).
+function flowStatusOf(step: ActivityStep, released: boolean): { text: string; cls: string } | null {
+  if (step.status === 'in_progress') return { text: 'em andamento', cls: 'activity-status-in-progress' };
+  if (released) return { text: 'liberado', cls: 'activity-status-released' };
+  if (step.validated) return { text: 'aprovado — falta liberar', cls: 'activity-status-approved' };
+  return null;
+}
+
 interface BlockNodeData extends Record<string, unknown> {
   step: ActivityStep;
   onValidate: (stepId: string) => void;
@@ -86,16 +113,18 @@ interface BlockNodeData extends Record<string, unknown> {
   busy: boolean;
   releasing: boolean;
   released: boolean;
+  needsConfirm: boolean;
   selected: boolean;
   subtaskCount: { done: number; total: number } | null;
 }
 
 function BlockNode({ data }: { data: BlockNodeData }) {
-  const { step, onValidate, onRelease, busy, releasing, released, selected, subtaskCount } = data;
+  const { step, onValidate, onRelease, busy, releasing, released, needsConfirm, selected, subtaskCount } = data;
   const stepId = step.id ?? step.title;
   const canValidate = step.status === 'done' && !step.validated;
   const subtasksPending = subtaskCount !== null && subtaskCount.done < subtaskCount.total;
   const canRelease = step.status === 'done' && !!step.validated && !released && !subtasksPending;
+  const flowStatus = flowStatusOf(step, released);
 
   // Botões de fluxo (Aprovar/Liberar) ficam sempre visíveis, só desabilitados
   // fora de hora — sumir o botão inteiro escondia a próxima ação possível,
@@ -106,13 +135,15 @@ function BlockNode({ data }: { data: BlockNodeData }) {
     : step.status !== 'done'
       ? 'Aguardando o Claude marcar este bloco como concluído.'
       : undefined;
-  const releaseTitle = released
-    ? 'Próxima etapa já liberada.'
-    : !step.validated
-      ? 'Aprove este bloco antes de liberar a próxima etapa.'
-      : subtasksPending
-        ? 'Resolva as subtasks pendentes deste bloco antes de liberar a próxima etapa.'
-        : 'Avisa o Claude que pode seguir pro(s) próximo(s) bloco(s) liberado(s)';
+  const releaseTitle = needsConfirm
+    ? 'O Claude parece estar trabalhando em outro bloco agora — clique de novo pra confirmar mesmo assim (pode interromper esse turno).'
+    : released
+      ? 'Próxima etapa já liberada.'
+      : !step.validated
+        ? 'Aprove este bloco antes de liberar a próxima etapa.'
+        : subtasksPending
+          ? 'Resolva as subtasks pendentes deste bloco antes de liberar a próxima etapa.'
+          : 'Avisa o Claude que pode seguir pro(s) próximo(s) bloco(s) liberado(s)';
 
   return (
     <div
@@ -122,7 +153,12 @@ function BlockNode({ data }: { data: BlockNodeData }) {
         <Handle type="target" position={Position.Left} />
         {STATUS_ICON[step.status] ?? STATUS_ICON.pending}
         <div className="block-node-body">
-          <span className="block-node-title">{step.title}</span>
+          <span className="block-node-title">
+            {step.title}
+            {step.specFile && (
+              <FiFileText className="block-node-spec-icon" size={12} title="Este bloco tem uma spec (.md) própria anexada" />
+            )}
+          </span>
           {subtaskCount && (
             <span className="block-node-subtask-count">
               {subtaskCount.done}/{subtaskCount.total} subtasks
@@ -131,9 +167,12 @@ function BlockNode({ data }: { data: BlockNodeData }) {
         </div>
         <Handle type="source" position={Position.Right} />
       </div>
+      {flowStatus && (
+        <div className="block-node-status-row">
+          <span className={`activity-status ${flowStatus.cls}`}>{flowStatus.text}</span>
+        </div>
+      )}
       <div className="block-node-footer">
-        {step.validated && <span className="block-node-validated-badge">aprovado</span>}
-        {released && <span className="block-node-validated-badge">próxima etapa liberada</span>}
         <button
           type="button"
           className="btn btn-primary block-node-validate"
@@ -148,7 +187,7 @@ function BlockNode({ data }: { data: BlockNodeData }) {
         </button>
         <button
           type="button"
-          className="btn btn-primary block-node-validate"
+          className={`btn btn-primary block-node-validate ${needsConfirm ? 'block-node-release-confirm' : ''}`}
           disabled={!canRelease || releasing}
           title={releaseTitle}
           onClick={(e) => {
@@ -156,7 +195,7 @@ function BlockNode({ data }: { data: BlockNodeData }) {
             onRelease(stepId);
           }}
         >
-          {releasing ? '…' : 'Liberar próxima etapa'}
+          {releasing ? '…' : needsConfirm ? 'Confirmar liberação?' : 'Liberar próxima etapa'}
         </button>
       </div>
     </div>
@@ -167,15 +206,23 @@ const NODE_TYPES = { block: BlockNode };
 
 // Uma dependência direta do bloco selecionado, com o "pronto" já resolvido
 // (mesma condição que libera o botão individual no próprio bloco dela —
-// ver canRelease em BlockNode) pra render no painel de detalhe.
+// ver canRelease em BlockNode) pra render no painel de detalhe. `flowStatus`
+// é o mesmo status (aprovado/liberado/em andamento) que aparece no card
+// da própria dependência — sem ele, um "pronto" (`ready`) genérico deixava
+// "aprovado, falta liberar" e "liberado de verdade" com o mesmo ícone de
+// check, dando a entender (errado) que os dois contam igual.
 interface DependencyStatus {
   id: string;
   title: string;
   ready: boolean;
+  flowStatus: { text: string; cls: string } | null;
 }
+
+const PENDING_STATUS = { text: 'pendente', cls: 'activity-status-pending' };
 
 interface BlockDetailPanelProps {
   block: ActivityStep;
+  released: boolean;
   dependencies: DependencyStatus[];
   subtasks: ActivityStep[];
   onAddSubtask: (blockId: string, title: string, files: File[]) => Promise<void>;
@@ -190,6 +237,8 @@ interface BlockDetailPanelProps {
   // numa coluna só, e a caixa acabava atravessando o diagrama inteiro).
   onReleaseGroup: (() => void) | null;
   releasingGroup: boolean;
+  needsConfirmGroup: boolean;
+  onDeleteBlock: (blockId: string, title: string) => void;
 }
 
 // Painel de detalhe de UM bloco selecionado no diagrama — é o que faz cada
@@ -201,6 +250,7 @@ interface BlockDetailPanelProps {
 // porque um bloco tem uma checklist mais longa que outro.
 function BlockDetailPanel({
   block,
+  released,
   dependencies,
   subtasks,
   onAddSubtask,
@@ -208,6 +258,8 @@ function BlockDetailPanel({
   onClose,
   onReleaseGroup,
   releasingGroup,
+  needsConfirmGroup,
+  onDeleteBlock,
 }: BlockDetailPanelProps) {
   const [newTitle, setNewTitle] = useState('');
   const [newFiles, setNewFiles] = useState<File[]>([]);
@@ -229,39 +281,70 @@ function BlockDetailPanel({
   }
 
   const allDepsReady = dependencies.length > 0 && dependencies.every((d) => d.ready);
+  const flowStatus = flowStatusOf(block, released);
 
   return (
     <div className="activity-block-detail">
       <div className="activity-block-detail-header">
         <strong>{block.title}</strong>
-        <button type="button" className="btn btn-icon" aria-label="Fechar detalhe do bloco" onClick={onClose}>
-          <FiX size={14} />
-        </button>
+        <div className="activity-block-detail-header-actions">
+          {block.source === 'user' && (
+            <button
+              type="button"
+              className="btn btn-icon"
+              aria-label="Excluir bloco"
+              title="Excluir este bloco (criado manualmente) — remove as subtasks dele junto"
+              onClick={() => onDeleteBlock(block.id ?? block.title, block.title)}
+            >
+              <FiTrash2 size={14} />
+            </button>
+          )}
+          <button type="button" className="btn btn-icon" aria-label="Fechar detalhe do bloco" onClick={onClose}>
+            <FiX size={14} />
+          </button>
+        </div>
       </div>
+      {flowStatus && <span className={`activity-status ${flowStatus.cls}`}>{flowStatus.text}</span>}
+      {block.specFile && (
+        <a
+          className="activity-block-spec-link"
+          href={attachmentUrl(block.specFile)}
+          target="_blank"
+          rel="noreferrer"
+          title="Spec própria deste bloco — o Claude lê este arquivo antes de trabalhar nele"
+        >
+          <FiFileText size={13} /> Ver spec deste bloco
+        </a>
+      )}
       {dependencies.length > 0 && (
         <div className="activity-block-dependencies">
           <p className="pending-note">Depende de:</p>
           <ul className="activity-block-dependencies-list">
-            {dependencies.map((d) => (
-              <li key={d.id} className={d.ready ? 'activity-block-dependency-ready' : ''}>
-                {d.ready ? <FiCheckCircle size={13} /> : <FiCircle size={13} />}
-                {d.title}
-              </li>
-            ))}
+            {dependencies.map((d) => {
+              const status = d.flowStatus ?? PENDING_STATUS;
+              return (
+                <li key={d.id}>
+                  <span>{d.title}</span>
+                  <span className={`activity-status ${status.cls}`}>{status.text}</span>
+                </li>
+              );
+            })}
           </ul>
           {onReleaseGroup && (
             <button
               type="button"
-              className="btn btn-primary"
+              className={`btn btn-primary ${needsConfirmGroup ? 'block-node-release-confirm' : ''}`}
               disabled={!allDepsReady || releasingGroup}
               title={
-                allDepsReady
-                  ? 'Avisa o Claude que pode seguir pra este bloco'
-                  : 'Aprove e resolva as subtasks de todas as dependências acima antes de liberar.'
+                needsConfirmGroup
+                  ? 'O Claude parece estar trabalhando em outro bloco agora — clique de novo pra confirmar mesmo assim (pode interromper esse turno).'
+                  : allDepsReady
+                    ? 'Avisa o Claude que pode seguir pra este bloco'
+                    : 'Aprove e resolva as subtasks de todas as dependências acima antes de liberar.'
               }
               onClick={onReleaseGroup}
             >
-              {releasingGroup ? '…' : 'Liberar dependências'}
+              {releasingGroup ? '…' : needsConfirmGroup ? 'Confirmar liberação?' : 'Liberar dependências'}
             </button>
           )}
         </div>
@@ -308,8 +391,10 @@ export function ActivityBlockGraph({
   busyStepId,
   onRelease,
   releasingStepId,
+  confirmReleaseStepId,
   onAddSubtask,
   onDeleteSubtask,
+  onDeleteBlock,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Instância crua do React Flow (via onInit) em vez do hook useReactFlow —
@@ -347,18 +432,6 @@ export function ActivityBlockGraph({
     });
   }
 
-  // Confirmação visual de que a liberação foi enviada — só local/efêmera
-  // (não persiste no backend, some ao trocar de aba/recarregar): o próprio
-  // `validated` continua true depois, não teria como distinguir "ainda não
-  // liberei" de "já liberei" sem isso, e reenviar o aviso de novo não é
-  // destrutivo, só redundante.
-  const [releasedIds, setReleasedIds] = useState<Set<string>>(new Set());
-
-  function handleRelease(stepId: string) {
-    onRelease(stepId);
-    setReleasedIds((prev) => new Set(prev).add(stepId));
-  }
-
   const subtasksByBlock = useMemo(() => {
     const map = new Map<string, ActivityStep[]>();
     for (const s of subtasks) {
@@ -386,10 +459,11 @@ export function ActivityBlockGraph({
         data: {
           step,
           onValidate,
-          onRelease: handleRelease,
+          onRelease,
           busy: busyStepId === stepId,
           releasing: releasingStepId === stepId,
-          released: releasedIds.has(stepId),
+          released: !!step.released,
+          needsConfirm: confirmReleaseStepId === stepId,
           selected: stepId === selectedId,
           subtaskCount:
             blockSubtasks.length > 0
@@ -408,7 +482,26 @@ export function ActivityBlockGraph({
       })),
     );
     return { nodes: builtNodes, edges: builtEdges };
-  }, [steps, onValidate, handleRelease, busyStepId, releasingStepId, releasedIds, selectedId, subtasksByBlock]);
+  }, [steps, onValidate, onRelease, busyStepId, releasingStepId, confirmReleaseStepId, selectedId, subtasksByBlock]);
+
+  // Reenquadra automaticamente sempre que aparece um bloco novo — sem
+  // isso, o `fitView` só rodava uma vez no mount: se você já tivesse dado
+  // zoom num bloco específico (clique único, ver handleNodeClick) antes
+  // de adicionar um bloco novo, a câmera ficava parada onde estava e o
+  // canvas inteiro podia parecer vazio (bug real reportado: depois de
+  // "+ Bloco", a tela ficou em branco até dar zoom out manualmente).
+  const blockCount = steps.filter((s) => s.id).length;
+  const prevBlockCountRef = useRef(blockCount);
+  useEffect(() => {
+    if (blockCount > prevBlockCountRef.current) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          reactFlowInstanceRef.current?.fitView({ duration: 400, ...BASE_FIT_VIEW_OPTIONS });
+        });
+      });
+    }
+    prevBlockCountRef.current = blockCount;
+  }, [blockCount]);
 
   const selectedBlock = steps.find((s) => (s.id ?? s.title) === selectedId) ?? null;
   // "Pronto" de cada dependência = mesma condição que libera o botão
@@ -420,12 +513,18 @@ export function ActivityBlockGraph({
     const dep = steps.find((s) => (s.id ?? s.title) === depId);
     const depSubtasks = subtasksByBlock.get(depId) ?? [];
     const ready = !!dep && dep.status === 'done' && !!dep.validated && depSubtasks.every((s) => s.status === 'done');
-    return { id: depId, title: dep?.title ?? depId, ready };
+    return {
+      id: depId,
+      title: dep?.title ?? depId,
+      ready,
+      flowStatus: dep ? flowStatusOf(dep, !!dep.released) : null,
+    };
   });
   // Só faz sentido juntar num botão só quando há mais de uma dependência
   // direta (fan-in) — com uma só, o botão individual dela já resolve.
-  const onReleaseGroup = dependencies.length > 1 ? () => handleRelease(dependencies[0].id) : null;
+  const onReleaseGroup = dependencies.length > 1 ? () => onRelease(dependencies[0].id) : null;
   const releasingGroup = dependencies.length > 1 && dependencies.some((d) => d.id === releasingStepId);
+  const needsConfirmGroup = dependencies.length > 1 && dependencies.some((d) => d.id === confirmReleaseStepId);
 
   return (
     <div className="activity-block-graph">
@@ -460,6 +559,7 @@ export function ActivityBlockGraph({
       {selectedBlock && (
         <BlockDetailPanel
           block={selectedBlock}
+          released={!!selectedBlock.released}
           dependencies={dependencies}
           subtasks={subtasksByBlock.get(selectedId!) ?? []}
           onAddSubtask={onAddSubtask}
@@ -467,6 +567,8 @@ export function ActivityBlockGraph({
           onClose={() => setSelectedId(null)}
           onReleaseGroup={onReleaseGroup}
           releasingGroup={releasingGroup}
+          needsConfirmGroup={needsConfirmGroup}
+          onDeleteBlock={onDeleteBlock}
         />
       )}
     </div>

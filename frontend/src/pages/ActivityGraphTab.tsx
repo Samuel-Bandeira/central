@@ -22,6 +22,7 @@ export function ActivityGraphTab({ projectId, activityId, projects }: Props) {
   const [running, setRunning] = useState(false);
   const [needsAttention, setNeedsAttention] = useState(false);
   const [steps, setSteps] = useState<ActivityStep[]>([]);
+  const [summary, setSummary] = useState('');
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const otherProjects = projects.filter((p) => p.id !== projectId);
@@ -55,8 +56,11 @@ export function ActivityGraphTab({ projectId, activityId, projects }: Props) {
     let cancelled = false;
     async function pollProgress() {
       try {
-        const { steps } = await api.getActivityProgress(activityId);
-        if (!cancelled) setSteps(steps);
+        const { steps, summary } = await api.getActivityProgress(activityId);
+        if (!cancelled) {
+          setSteps(steps);
+          setSummary(summary);
+        }
       } catch {
         // arquivo pode não existir ainda, ou estar no meio de uma escrita — ignora
       }
@@ -89,6 +93,7 @@ export function ActivityGraphTab({ projectId, activityId, projects }: Props) {
           needsAttention={running && needsAttention}
           steps={steps}
           onStepsChange={setSteps}
+          summary={summary}
           onChanged={refresh}
           onRefreshRunning={refreshRunning}
         />

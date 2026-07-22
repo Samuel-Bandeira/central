@@ -94,6 +94,31 @@ def push(folder: str, branch: str) -> None:
     _run(folder, "push", "-u", "origin", branch)
 
 
+def diff_summary(folder: str, base_ref: str, branch: str) -> list[dict]:
+    """Lista de arquivos que `branch` criou/mexeu/removeu desde que
+    divergiu de `base_ref` — diff de três pontos (`base...branch`), mesmo
+    critério do "Compare" do GitHub/GitLab (compara contra o ancestral
+    comum, não contra a ponta atual de `base_ref`, então commits novos em
+    `base_ref` depois da divergência não aparecem como "mudança" da
+    atividade). Fonte real pro "o que foi feito nesta atividade" — ao
+    contrário de pedir pro Claude listar isso de memória (não confiável
+    numa spec grande com muitos blocos), isso é o próprio git calculando."""
+    output = _run(folder, "diff", "--name-status", f"{base_ref}...{branch}")
+    files: list[dict] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        code = parts[0]
+        if code.startswith("R") and len(parts) == 3:
+            files.append({"path": parts[2], "oldPath": parts[1], "status": "renamed"})
+        elif len(parts) == 2:
+            status = {"A": "added", "M": "modified", "D": "deleted"}.get(code[0], "modified")
+            files.append({"path": parts[1], "oldPath": None, "status": status})
+    return files
+
+
 def list_branches(folder: str) -> list[str]:
     """`git fetch --prune` (melhor esforço — ignora erro se não tiver
     remoto configurado) e retorna os nomes de branch conhecidos (locais +

@@ -131,6 +131,16 @@ export interface ActivityStep {
   // Claude é instruído a nunca escrever aqui, mesmo espírito de
   // AcceptanceCriterion.met.
   validated?: boolean;
+  // Idem, mas setado por POST .../steps/{stepId}/release — precisa
+  // persistir (não só refletir na resposta da chamada) senão um refresh
+  // da página perde a informação e o botão "Liberar próxima etapa" volta a
+  // aparecer clicável num bloco que já foi liberado de verdade.
+  released?: boolean;
+  // Spec .md própria deste bloco (POST /activities/{id}/blocks, ver
+  // add_activity_block) — diferente do specFile da Activity, que cobre a
+  // atividade inteira: esse aqui é o escopo específico de UM bloco (ex:
+  // um pedido extra criado depois, com um documento novo anexado).
+  specFile?: string;
 }
 
 export function attachmentUrl(path: string): string {
@@ -139,6 +149,26 @@ export function attachmentUrl(path: string): string {
 
 export interface ActivityProgress {
   steps: ActivityStep[];
+  // Visão geral em prosa que o Claude mantém sobre a atividade — o que ela
+  // faz e o que esperar ver na UI quando pronta. Sobrevive à fragmentação
+  // do checklist em passos/blocos miúdos (ver SUMMARY_FIELD_INSTRUCTION no
+  // backend), string vazia até o Claude escrever o primeiro entendimento.
+  summary: string;
+}
+
+export type ActivityDiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+export interface ActivityDiffFile {
+  path: string;
+  oldPath: string | null;
+  status: ActivityDiffFileStatus;
+}
+
+// Lista real (via `git diff` no backend, não depende do que o Claude
+// lembra/escreve) de arquivos que a atividade criou/mexeu/removeu — ver
+// GET /activities/{id}/diff-summary.
+export interface ActivityDiffSummary {
+  files: ActivityDiffFile[];
 }
 
 export interface ActivityStartResult {

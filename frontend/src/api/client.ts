@@ -1,6 +1,7 @@
 import type {
   Activity,
   ActivityConcludeResult,
+  ActivityDiffSummary,
   ActivityInput,
   ActivityProgress,
   ActivityStartResult,
@@ -109,7 +110,23 @@ export const api = {
   },
   deleteActivityStep: (id: string, title: string) =>
     request<ActivityProgress>(`/activities/${id}/steps`, { method: 'DELETE', body: JSON.stringify({ title }) }),
+  addActivityBlock: (id: string, title: string, dependsOn: string[] = [], specFile?: File) => {
+    const formData = new FormData();
+    formData.set('title', title);
+    dependsOn.forEach((depId) => formData.append('dependsOn', depId));
+    if (specFile) formData.set('specFile', specFile);
+    return requestMultipart<{ steps: ActivityStep[]; sent: boolean; needsConfirmation: boolean; blockId: string }>(
+      `/activities/${id}/blocks`,
+      'POST',
+      formData,
+    );
+  },
+  notifyActivityBlock: (id: string, blockId: string) =>
+    request<{ sent: boolean }>(`/activities/${id}/blocks/${encodeURIComponent(blockId)}/notify`, { method: 'POST' }),
+  deleteActivityBlock: (id: string, blockId: string) =>
+    request<ActivityProgress>(`/activities/${id}/blocks/${encodeURIComponent(blockId)}`, { method: 'DELETE' }),
   getActivityProgress: (id: string) => request<ActivityProgress>(`/activities/${id}/progress`),
+  getActivityDiffSummary: (id: string) => request<ActivityDiffSummary>(`/activities/${id}/diff-summary`),
   getRunningActivities: () => request<RunningActivities>('/running-activities'),
 
   uploadActivityAttachments: (id: string, files: File[]) => {
@@ -130,8 +147,9 @@ export const api = {
     request<{ steps: ActivityStep[] }>(`/activities/${id}/steps/${encodeURIComponent(stepId)}/validate`, {
       method: 'POST',
     }),
-  releaseActivityStep: (id: string, stepId: string) =>
-    request<{ steps: ActivityStep[]; sent: boolean }>(`/activities/${id}/steps/${encodeURIComponent(stepId)}/release`, {
-      method: 'POST',
-    }),
+  releaseActivityStep: (id: string, stepId: string, confirm = false) =>
+    request<{ steps: ActivityStep[]; sent: boolean; needsConfirmation: boolean }>(
+      `/activities/${id}/steps/${encodeURIComponent(stepId)}/release?confirm=${confirm}`,
+      { method: 'POST' },
+    ),
 };

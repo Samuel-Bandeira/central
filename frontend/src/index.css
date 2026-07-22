@@ -425,6 +425,10 @@ button {
   color: var(--danger);
 }
 
+.activity-block-notify-retry {
+  margin-top: 4px;
+}
+
 .field-success {
   color: var(--success);
 }
@@ -688,11 +692,144 @@ button {
   text-decoration: underline;
 }
 
+.activity-status-in-progress {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  animation: running-dot-pulse 1.4s ease-in-out infinite;
+}
+
+/* Aprovado, mas eu ainda não liberei — a bola está comigo. */
+.activity-status-approved {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* Já liberei — fato permanente, sem pulso: nada de sugerir "aguarde algo"
+   pra um bloco liberado há muito tempo (a confirmação do clique recente é
+   separada, uma mensagem à parte só na hora). */
+.activity-status-released {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+/* Ainda nem "done" pelo Claude, ou "done" sem eu ter aprovado — usado só
+   na lista de dependências do painel de detalhe, pra nunca deixar uma
+   dependência sem nenhum status visível (nem aprovado, nem liberado, nem
+   em andamento). */
+.activity-status-pending {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+
 .activity-prompt {
   font-size: 13px;
   color: var(--text-muted);
   margin: 6px 0 0;
   white-space: pre-wrap;
+}
+
+/* Visão geral que o Claude escreve sobre a atividade (campo "summary" do
+   arquivo de progresso) — visualmente separada do prompt original (o que
+   EU pedi) porque é o entendimento/estado ATUAL segundo o Claude,
+   especialmente útil depois que uma spec grande vira uma dezena de blocos
+   com títulos curtos e o contexto do todo se perde entre eles. */
+.activity-summary {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.activity-summary-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+
+.activity-summary p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.activity-diff-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0;
+}
+
+.activity-diff-summary-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.activity-diff-summary-toggle:hover {
+  color: var(--accent);
+}
+
+.activity-diff-summary-refresh {
+  padding: 2px;
+  width: 20px;
+  height: 20px;
+}
+
+.activity-diff-summary-list {
+  width: 100%;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.activity-diff-summary-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.activity-diff-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+}
+
+.activity-diff-icon-added {
+  color: var(--success);
+}
+
+.activity-diff-icon-modified {
+  color: var(--accent);
+}
+
+.activity-diff-icon-deleted {
+  color: var(--danger);
+}
+
+.activity-diff-icon-renamed {
+  color: var(--text-muted);
 }
 
 .activity-related {
@@ -907,9 +1044,37 @@ button {
   gap: 8px;
 }
 
+.activity-block-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .activity-block-detail .activity-add-step {
   flex-direction: column;
   align-items: stretch;
+}
+
+.activity-add-block {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.activity-add-block-deps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.activity-add-block-dep {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 .activity-graph-tab .activity-block-graph-wrap {
@@ -984,6 +1149,13 @@ button {
   line-height: 1.3;
 }
 
+.block-node-spec-icon {
+  flex-shrink: 0;
+  margin-left: 4px;
+  vertical-align: -1px;
+  color: var(--accent);
+}
+
 .block-node-subtask-count {
   font-size: 11px;
   color: var(--text-muted);
@@ -1012,14 +1184,15 @@ button {
   border-color: var(--success);
 }
 
-.block-node-validated-badge {
-  font-size: 11px;
-  color: var(--success);
-  white-space: nowrap;
+.block-node-in_progress {
+  border-color: var(--accent);
+}
+
+.block-node-status-row {
+  display: flex;
 }
 
 .block-node-validate {
-  margin-left: auto;
   padding: 3px 8px;
   font-size: 12px;
 }
@@ -1027,6 +1200,25 @@ button {
 .block-node-validate:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* "Confirmar liberação?" — pede um segundo clique porque o Claude parece
+   ocupado agora (ver confirmReleaseStepId). Cor de aviso, não a roxa
+   padrão dos outros botões, pra chamar atenção de que esse clique é
+   diferente dos outros (pode interromper um turno ativo). */
+.block-node-release-confirm {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: #1a1a1a;
+}
+
+.activity-block-spec-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  font-size: 12px;
+  color: var(--accent);
 }
 
 .activity-block-dependencies {
@@ -1054,19 +1246,11 @@ button {
 
 .activity-block-dependencies-list li {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 3px;
   color: var(--text-muted);
   line-height: 1.35;
-}
-
-.activity-block-dependencies-list li svg {
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-
-.activity-block-dependency-ready {
-  color: var(--success) !important;
 }
 
 .activity-block-dependencies .btn {

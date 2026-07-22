@@ -53,41 +53,68 @@ def list_open_activity_ids(known_ids: list[str]) -> list[str]:
     return [activity_id for activity_id in known_ids if activity_id in window_ids and _window_exists(window_ids[activity_id])]
 
 
-def is_waiting_for_input(activity_id: str) -> bool:
-    """Melhor esforço: lê o conteúdo visível da janela do Terminal e tenta
-    adivinhar se o Claude está parado esperando algo de você — respondeu
-    uma pergunta, terminou o turno, ou está num menu de permissão — em vez
-    de ativamente gerando/rodando ferramenta. Baseado em texto que o
-    próprio Claude Code CLI imprime (confirmado lendo o conteúdo real de
-    uma janela ao vivo, 2026-07-20): enquanto está trabalhando, o rodapé
-    mostra um spinner com "(esc to interrupt)"; quando o turno termina (ou
-    fica parado num menu de permissão), esse texto some. Ausência de "esc
-    to interrupt" nos últimos caracteres visíveis == precisa de você.
-    Inerentemente frágil (texto de UI de terceiro, muda entre versões do
-    CLI) — se parar de bater, é aqui que ajustar. Retorna False se a
-    janela não existe ou não deu pra ler o conteúdo (nada a indicar).
-
-    Exceção: quando o Claude dispara um agente em background e fica só
-    aguardando a notificação de conclusão, o rodapé "esc to interrupt"
-    some (não tem geração ativa), mas ele não está parado esperando você —
-    está esperando o subagente. Esse estado imprime "Waiting for N
-    background agent(s) to finish", então tratamos essa string como sinal
-    de "ainda ocupado" e caímos de volta na heurística padrão se ela não
-    aparecer."""
+def _visible_tail(activity_id: str) -> str | None:
+    """Últimos ~4000 caracteres visíveis na janela do Terminal dessa
+    atividade — base compartilhada de `is_waiting_for_input` e
+    `is_actively_working`. `None` se a janela não existe ou não deu pra
+    ler o conteúdo."""
     window_ids = _load_window_ids()
     window_id = window_ids.get(activity_id)
     if window_id is None or not _window_exists(window_id):
-        return False
+        return None
     script = f'tell application "Terminal" to return contents of selected tab of window id {window_id}'
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode != 0:
-        return False
-    tail = result.stdout[-4000:]
+        return None
+    return result.stdout[-4000:]
+
+
+def _looks_busy(tail: str) -> bool:
+    """Melhor esforço, baseado em texto que o próprio Claude Code CLI
+    imprime (confirmado lendo o conteúdo real de uma janela ao vivo,
+    2026-07-20): enquanto está trabalhando, o rodapé mostra um spinner com
+    "(esc to interrupt)"; quando o turno termina (ou fica parado num menu
+    de permissão), esse texto some. Inerentemente frágil (texto de UI de
+    terceiro, muda entre versões do CLI) — se parar de bater, é aqui que
+    ajustar.
+
+    Exceção: quando o Claude dispara um agente em background e fica só
+    aguardando a notificação de conclusão, "esc to interrupt" some (não
+    tem geração ativa), mas ele não está parado esperando você — está
+    esperando o subagente. Esse estado imprime "Waiting for N background
+    agent(s) to finish", tratado aqui como "ainda ocupado" também."""
     if "esc to interrupt" in tail:
-        return False
+        return True
     if "background agent" in tail and "Waiting for" in tail:
+        return True
+    return False
+
+
+def is_waiting_for_input(activity_id: str) -> bool:
+    """Tenta adivinhar se o Claude está parado esperando algo de você
+    (respondeu uma pergunta, terminou o turno, ou está num menu de
+    permissão) em vez de ativamente gerando/rodando ferramenta — usado
+    pro badge "precisa de você". Retorna False se a janela não existe ou
+    não deu pra ler o conteúdo (nada a indicar, mesmo tratamento de
+    "ocupado" — diferente de `is_actively_working`, aqui a ambiguidade
+    não importa pro caso de uso)."""
+    tail = _visible_tail(activity_id)
+    if tail is None:
         return False
-    return True
+    return not _looks_busy(tail)
+
+
+def is_actively_working(activity_id: str) -> bool:
+    """Usado antes de mandar o Esc automatizado (`send_pause_instruction`/
+    `send_advance_instruction`, via `_type_into_window`) pra avisar antes
+    de arriscar interromper um turno ativo — diferente de
+    `is_waiting_for_input`, aqui "sem janela" conta como False de
+    propósito (nada a interromper mesmo, não é ambiguidade a tratar como
+    "ocupado")."""
+    tail = _visible_tail(activity_id)
+    if tail is None:
+        return False
+    return _looks_busy(tail)
 
 
 def open_claude_window(activity_id: str, folder: str, prompt: str, related_folders: list[str] | None = None) -> None:
@@ -232,10 +259,42 @@ def send_advance_instruction(activity_id: str, block_title: str) -> bool:
     if window_id is None or not _window_exists(window_id):
         return False
     text = (
-        f'O bloco "{block_title}" foi aprovado por mim e todas as subtasks dele '
-        "já estão resolvidas. Pode seguir para o(s) próximo(s) bloco(s) do plano "
-        "cujas dependências já estejam satisfeitas (status \"done\" e "
-        "\"validated\": true) — sem pular nenhum que ainda não esteja liberado."
+        f'O bloco "{block_title}" foi liberado por mim (aprovado, e todas as '
+        "subtasks dele já resolvidas). Pode seguir para o(s) próximo(s) bloco(s) "
+        "do plano cujas dependências já estejam satisfeitas (status \"done\" e "
+        "\"released\": true) — sem pular nenhum que ainda não esteja liberado."
+    )
+    _type_into_window(window_id, text)
+    return True
+
+
+def send_new_block_instruction(activity_id: str, block_title: str, spec_file: str | None = None) -> bool:
+    """Mesma técnica de `send_advance_instruction`, mas pra avisar que EU
+    adicionei um bloco novo ao plano (por fora, via UI — ver
+    `add_activity_block` em routers/activities.py) — usado quando a
+    "task grande" já estava com tudo concluído e surge um pedido extra, ou
+    quando quero encaixar um bloco novo no meio do trabalho. Sem isso, uma
+    sessão que já tinha lido o plano original não teria como saber que
+    apareceu algo novo até eu pausar/retomar.
+
+    `spec_file`, quando presente, é a spec própria desse bloco (campo
+    "specFile" dele, diferente da spec da atividade inteira) — normalmente
+    um documento novo (ex: os endpoints reais que o backend implementou)
+    que define o escopo específico desse bloco.
+
+    Retorna False se não há janela conhecida (ou ela já fechou) pra essa
+    atividade — nesse caso o bloco fica salvo mesmo assim, e a instrução de
+    passos pendentes (`start_activity`) avisa o Claude na próxima retomada."""
+    window_ids = _load_window_ids()
+    window_id = window_ids.get(activity_id)
+    if window_id is None or not _window_exists(window_id):
+        return False
+    spec_note = f' Esse bloco tem uma spec própria em {spec_file} — leia antes de trabalhar nele.' if spec_file else ""
+    text = (
+        f'Adicionei um bloco novo ao plano por fora: "{block_title}" — confira o '
+        "arquivo de progresso pra ver o \"dependsOn\" dele e comece nesse bloco "
+        "se as dependências já estiverem liberadas (status \"done\" e "
+        f"\"released\": true), seguindo a mesma trava de sempre.{spec_note}"
     )
     _type_into_window(window_id, text)
     return True

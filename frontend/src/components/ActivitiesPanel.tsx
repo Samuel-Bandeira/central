@@ -57,6 +57,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects, onOpenGraph }
   const [creatingBigTask, setCreatingBigTask] = useState(false);
   const [bigTaskForm, setBigTaskForm] = useState<BigTaskFormState>(EMPTY_BIG_TASK_FORM);
   const [stepsByActivity, setStepsByActivity] = useState<Record<string, ActivityStep[]>>({});
+  const [summaryByActivity, setSummaryByActivity] = useState<Record<string, string>>({});
   // "Em progresso" inclui até as que nunca foram iniciadas — só "Concluída"
   // de verdade (MR aberto) sai dessa aba. Padrão "progress" porque é o que
   // importa no dia a dia; "Concluídas" só cresce e é consultada por escolha.
@@ -96,8 +97,11 @@ export function ActivitiesPanel({ projectId, hasFolders, projects, onOpenGraph }
       await Promise.all(
         ids.map(async (id) => {
           try {
-            const { steps } = await api.getActivityProgress(id);
-            if (!cancelled) setStepsByActivity((prev) => ({ ...prev, [id]: steps }));
+            const { steps, summary } = await api.getActivityProgress(id);
+            if (!cancelled) {
+              setStepsByActivity((prev) => ({ ...prev, [id]: steps }));
+              setSummaryByActivity((prev) => ({ ...prev, [id]: summary }));
+            }
           } catch {
             // arquivo pode não existir ainda, ou estar no meio de uma escrita — ignora
           }
@@ -206,6 +210,7 @@ export function ActivitiesPanel({ projectId, hasFolders, projects, onOpenGraph }
               needsAttention={runningIds.has(activity.id) && needsAttentionIds.has(activity.id)}
               steps={stepsByActivity[activity.id] ?? []}
               onStepsChange={(steps) => setStepsByActivity((prev) => ({ ...prev, [activity.id]: steps }))}
+              summary={summaryByActivity[activity.id] ?? ''}
               onChanged={refresh}
               onRefreshRunning={refreshRunning}
               onOpenGraph={onOpenGraph}
